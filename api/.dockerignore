@@ -1,0 +1,5 @@
+src/
+pom.xml
+target/classes/
+target/test-classes/
+target/surefire-reports/

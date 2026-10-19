@@ -1,0 +1,15 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: ops-platform-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ops_platform}
+    username: ${DB_USERNAME:ops}
+    password: ${DB_PASSWORD:ops_password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  jackson:
+    time-zone: Asia/Shanghai

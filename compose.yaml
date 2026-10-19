@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: m.daocloud.io/docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_DB: ops_platform
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ops_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops -d ops_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: m.daocloud.io/docker.io/library/redis:latest
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    environment:
+      TZ: Asia/Shanghai
+      OPS_AUTH_USERNAME: ${OPS_AUTH_USERNAME:-admin}
+      OPS_AUTH_PASSWORD: ${OPS_AUTH_PASSWORD:-admin123}
+      OPS_AUTH_DISPLAY_NAME: ${OPS_AUTH_DISPLAY_NAME:-平台管理员}
+      OPS_HERTZBEAT_URL: http://hertzbeat:1157
+      OPS_HERTZBEAT_USERNAME: ${OPS_HERTZBEAT_USERNAME:-admin}
+      OPS_HERTZBEAT_PASSWORD: ${OPS_HERTZBEAT_PASSWORD:-hertzbeat}
+      DB_URL: jdbc:postgresql://postgres:5432/ops_platform
+      DB_USERNAME: ops
+      DB_PASSWORD: ${DB_PASSWORD:-ops_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/auth/status >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: ./web
+    ports:
+      - "8088:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  victoriametrics:
+    image: m.daocloud.io/docker.io/victoriametrics/victoria-metrics:latest
+    command: ["-storageDataPath=/storage", "-retentionPeriod=90d"]
+    ports:
+      - "8428:8428"
+    volumes:
+      - vm-data:/storage
+
+  hertzbeat:
+    image: m.daocloud.io/docker.io/apache/hertzbeat:latest
+    ports:
+      - "1157:1157"
+    volumes:
+      - hertzbeat-data:/opt/hertzbeat/data
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  vm-data:
+  hertzbeat-data:
