@@ -3,7 +3,7 @@ epic: ../epics/hertzbeat-observability-loop.md
 phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
 current_item: null
-next_action: 复审 owner 验收驳回后的状态语义修复，再次进入 owner 最终接受 gate
+next_action: 验证数字监控状态修复后的线上结果，保留 owner 验收驳回状态
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -47,3 +47,7 @@ remote_publish: manual
 - 当前两个 HTTP 资产 `host.docker.internal:7788/4173` 的 HertzBeat 原始指标响应为 `query metrics data is empty`，所以保持 `UNKNOWN/待采样`；PostgreSQL 有近期采样，保持 `UP/可用`。
 - 状态语义复审指出详情抽屉仍把从未采样描述为“超过 180 秒未更新”；现已按 `metricsCollectedAt` 分支，无采样显示“暂无指标采样，当前状态为待采样”，有旧采样且超时才显示“数据已陈旧”。
 - 详情文案修复后前端生产构建和 Docker Web 重建通过。
+- 进一步根因核查推翻此前“两个 HTTP 资产只是待采样”的结论：本机运行包 `CommonConstants` 明确定义 `MONITOR_UP_CODE=1`、`MONITOR_DOWN_CODE=2`、`MONITOR_PAUSED_CODE=0`。两个 HTTP 监控返回 status=2，适配器此前忽略此字段，错误输出 UNKNOWN。
+- 已按本机实际常量补齐数字状态映射，保留指标时间读取且不让历史非空指标覆盖明确 DOWN；新增数字 UP/DOWN 回归测试，后端 48 项测试及打包通过。
+- 从 HertzBeat 容器实际请求 `host.docker.internal:7788/health` 和 `host.docker.internal:4173/` 均返回 Connection refused。应显示两个不可用服务，不能将异常数量 0 作为验收成功证据；前面的 0 仅证明统计公式更改，未证明状态适配正确。
+- 最新容器在线验证：手动同步 SUCCESS、更新 3 个资产；libo-backend/libo-h5 均为 DOWN，libo-postgresql 为 UP 且采样新鲜，异常数量为 2。详情无采样提示已移除“当前状态待采样”的推断，UNKNOWN 统一显示“状态未知”。Owner 未接受，Epic 保持 active。

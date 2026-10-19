@@ -102,13 +102,21 @@ public class HertzBeatClient {
     if (monitor.isMissingNode() || monitor.isNull()) return new MonitorStatus("UNKNOWN", null, false);
     JsonNode runtimeStatus = first(monitor, "monitorStatus", "available", "availability", "state");
     String status = mapRuntimeStatus(runtimeStatus);
+    if ("UNKNOWN".equals(status) && monitor.path("status").isNumber()) {
+      status = switch (monitor.path("status").asInt()) {
+        case 1 -> "UP";
+        case 2 -> "DOWN";
+        default -> "UNKNOWN";
+      };
+    }
     boolean disabled = monitor.path("status").isNumber() && monitor.path("status").asInt() == 0;
     if (disabled) status = "UNKNOWN";
     LocalDateTime collectedAt = parseTime(first(monitor, "lastCollectTime", "lastUpdateTime", "updateTime"));
-    if (!disabled && "UNKNOWN".equals(status)) {
+    if (!disabled) {
       JsonNode metrics = getJson(token, "/api/monitor/" + monitorId + "/metrics/summary").path("data");
       collectedAt = parseTime(metrics.path("time"));
-      if (metrics.path("valueRows").isArray() && !metrics.path("valueRows").isEmpty()) status = "UP";
+      if ("UNKNOWN".equals(status) && metrics.path("valueRows").isArray()
+          && !metrics.path("valueRows").isEmpty()) status = "UP";
     }
     return new MonitorStatus(status, collectedAt, disabled);
   }

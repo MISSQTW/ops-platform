@@ -211,7 +211,7 @@ function badge(status) {
 function statusText(status) {
     const mapping = {
         RUNNING: '运行中', UP: '可用', DOWN: '不可用', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
-        PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '待采样',
+        PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '状态未知',
         ENABLED: '已启用', DISABLED: '已停用',
     };
     return mapping[status] ?? status;
@@ -3327,13 +3327,13 @@ function __VLS_template() {
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_917 = __VLS_asFunctionalComponent(__VLS_916, new __VLS_916({
-                    title: ("HertzBeat 暂无指标采样，当前状态为待采样"),
+                    title: ("暂无指标采样；服务可用性以监控状态为准"),
                     type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
                 const __VLS_918 = __VLS_917({
-                    title: ("HertzBeat 暂无指标采样，当前状态为待采样"),
+                    title: ("暂无指标采样；服务可用性以监控状态为准"),
                     type: ("info"),
                     closable: ((false)),
                     showIcon: (true),

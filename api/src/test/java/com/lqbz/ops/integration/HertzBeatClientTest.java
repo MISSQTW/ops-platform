@@ -115,6 +115,28 @@ class HertzBeatClientTest {
         .isInstanceOf(HertzBeatClient.MonitorNotFoundException.class);
   }
 
+  @Test
+  void 数字不可用状态不能被空指标或历史成功指标覆盖() throws Exception {
+    server.createContext("/api/monitor/456", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"monitor\":{\"id\":456,\"status\":2}}}"));
+    server.createContext("/api/monitor/456/metrics/summary", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"valueRows\":[]}}"));
+
+    assertThat(client.monitorStatus(456L).status()).isEqualTo("DOWN");
+  }
+
+  @Test
+  void 数字可用状态应保留指标采集时间() throws Exception {
+    server.createContext("/api/monitor/457", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"monitor\":{\"id\":457,\"status\":1}}}"));
+    server.createContext("/api/monitor/457/metrics/summary", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"time\":1792384800000,\"valueRows\":[]}}"));
+
+    HertzBeatClient.MonitorStatus result = client.monitorStatus(457L);
+    assertThat(result.status()).isEqualTo("UP");
+    assertThat(result.collectedAt()).isNotNull();
+  }
+
   private CapturedRequest capture(HttpExchange exchange) throws IOException {
     String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
     return new CapturedRequest(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
