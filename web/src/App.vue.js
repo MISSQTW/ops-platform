@@ -3322,56 +3322,88 @@ function __VLS_template() {
             __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
             __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.monitoringDetails.asset.lastCollectedAt ? __VLS_ctx.formatTime(__VLS_ctx.monitoringDetails.asset.lastCollectedAt) : '--');
-            if (!__VLS_ctx.monitoringDetails.metricsCollectedAt) {
+            __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: ("monitoring-summary") },
+            });
+            __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+            __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.monitoringDetails.asset.type);
+            __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+            __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.monitoringDetails.asset.lastSyncAttemptAt ? __VLS_ctx.formatTime(__VLS_ctx.monitoringDetails.asset.lastSyncAttemptAt) : '尚未尝试');
+            __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+            __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+            (__VLS_ctx.monitoringDetails.asset.lastSuccessfulSyncAt ? __VLS_ctx.formatTime(__VLS_ctx.monitoringDetails.asset.lastSuccessfulSyncAt) : '尚未成功');
+            if (__VLS_ctx.monitoringDetails.asset.monitoringError) {
                 const __VLS_916 = {}.ElAlert;
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_917 = __VLS_asFunctionalComponent(__VLS_916, new __VLS_916({
-                    title: ("暂无指标采样；服务可用性以监控状态为准"),
-                    type: ("info"),
+                    title: ((__VLS_ctx.monitoringDetails.asset.monitoringError)),
+                    type: ("warning"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
                 const __VLS_918 = __VLS_917({
-                    title: ("暂无指标采样；服务可用性以监控状态为准"),
-                    type: ("info"),
+                    title: ((__VLS_ctx.monitoringDetails.asset.monitoringError)),
+                    type: ("warning"),
                     closable: ((false)),
                     showIcon: (true),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_917));
             }
-            else if (__VLS_ctx.monitoringDetails.metricsStale) {
+            if (!__VLS_ctx.monitoringDetails.metricsCollectedAt) {
                 const __VLS_922 = {}.ElAlert;
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_923 = __VLS_asFunctionalComponent(__VLS_922, new __VLS_922({
-                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
-                    type: ("warning"),
+                    title: ("暂无指标采样；服务可用性以监控状态为准"),
+                    type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
                 const __VLS_924 = __VLS_923({
-                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
-                    type: ("warning"),
+                    title: ("暂无指标采样；服务可用性以监控状态为准"),
+                    type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_923));
             }
-            if (__VLS_ctx.monitoringDetails.metricsMessage) {
+            else if (__VLS_ctx.monitoringDetails.metricsStale) {
                 const __VLS_928 = {}.ElAlert;
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_929 = __VLS_asFunctionalComponent(__VLS_928, new __VLS_928({
+                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
+                    type: ("warning"),
+                    closable: ((false)),
+                    showIcon: (true),
+                }));
+                const __VLS_930 = __VLS_929({
+                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
+                    type: ("warning"),
+                    closable: ((false)),
+                    showIcon: (true),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_929));
+            }
+            if (__VLS_ctx.monitoringDetails.metricsMessage) {
+                const __VLS_934 = {}.ElAlert;
+                /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
+                // @ts-ignore
+                const __VLS_935 = __VLS_asFunctionalComponent(__VLS_934, new __VLS_934({
                     title: ((__VLS_ctx.monitoringDetails.metricsMessage)),
                     type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
-                const __VLS_930 = __VLS_929({
+                const __VLS_936 = __VLS_935({
                     title: ((__VLS_ctx.monitoringDetails.metricsMessage)),
                     type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_929));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_935));
             }
             __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: ("monitoring-metrics") },
@@ -3416,20 +3448,20 @@ function __VLS_template() {
                 __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     key: ((run.id)),
                 });
-                const __VLS_934 = {}.ElTag;
+                const __VLS_940 = {}.ElTag;
                 /** @type { [typeof __VLS_components.ElTag, typeof __VLS_components.elTag, typeof __VLS_components.ElTag, typeof __VLS_components.elTag, ] } */ ;
                 // @ts-ignore
-                const __VLS_935 = __VLS_asFunctionalComponent(__VLS_934, new __VLS_934({
+                const __VLS_941 = __VLS_asFunctionalComponent(__VLS_940, new __VLS_940({
                     type: ((run.status === 'SUCCESS' ? 'success' : run.status === 'PARTIAL' ? 'warning' : 'danger')),
                     size: ("small"),
                 }));
-                const __VLS_936 = __VLS_935({
+                const __VLS_942 = __VLS_941({
                     type: ((run.status === 'SUCCESS' ? 'success' : run.status === 'PARTIAL' ? 'warning' : 'danger')),
                     size: ("small"),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_935));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_941));
                 (run.status);
-                __VLS_939.slots.default;
-                var __VLS_939;
+                __VLS_945.slots.default;
+                var __VLS_945;
                 __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
                 (__VLS_ctx.formatRecordTime(run.startedAt));
                 __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -3440,7 +3472,7 @@ function __VLS_template() {
         __VLS_915.slots.default;
         var __VLS_915;
     }
-    ['auth-loading', 'spinning', 'login-page', 'login-panel', 'login-brand', 'brand-mark', 'login-submit', 'app-shell', 'sidebar', 'brand', 'brand-mark', 'scope-label', 'nav-item', 'active', 'nav-arrow', 'sidebar-spacer', 'integration-list', 'scope-label', 'integration-dot', 'connected', 'operator', 'avatar', 'main-area', 'topbar', 'topbar-title', 'records-back', 'topbar-actions', 'search', 'updated', 'icon-button', 'spinning', 'secondary-button', 'spin-icon', 'secondary-button', 'spin-icon', 'primary-button', 'error-state', 'content', 'dashboard-view', 'metrics-grid', 'metric', 'metric-icon', 'blue', 'metric-arrow', 'metric', 'metric-icon', 'green', 'metric-arrow', 'metric', 'metric-icon', 'amber', 'metric-arrow', 'metric', 'metric-icon', 'red', 'metric-arrow', 'metric', 'metric-icon', 'cyan', 'metric-arrow', 'dashboard-grid', 'panel', 'span-two', 'panel-heading', 'text-button', 'asset-overview', 'asset-stat', 'health-bar', 'panel', 'panel-heading', 'pass-ring', 'mini-list', 'dot', 'panel', 'span-three', 'panel-heading', 'icon-button', 'alert-stream', 'alert-row', 'severity', 'alert-main', 'content', 'list-view', 'list-summary', 'legend', 'ok', 'warn', 'bad', 'project-grid', 'project-card', 'project-head', 'project-symbol', 'card-actions', 'danger-action', 'project-meta', 'project-footer', 'table-panel', 'asset-status', 'sync-state', 'row-actions', 'spin-icon', 'danger-action', 'inspection-center', 'inspection-view-heading', 'inspection-heading-title', 'records-back', 'plan-grid', 'plan-card', 'plan-card-head', 'plan-icon', 'plan-actions', 'plan-commands', 'spin-icon', 'plan-toggle-button', 'danger-action', 'empty-state', 'plan-empty', 'result-list', 'result-card', 'result-status', 'result-main', 'result-score', 'result-meta', 'result-executed-at', 'result-arrow', 'empty-state', 'inspection-pagination', 'table-panel', 'severity', 'editor-form', 'editor-form', 'form-grid', 'production-note', 'editor-form', 'form-grid', 'field-hint', 'drawer-footer', 'inspection-detail', 'detail-summary', 'detail-score', 'detail-counts', 'passed', 'warning', 'failed', 'detail-context', 'check-list', 'check-item', 'check-icon', 'check-content', 'monitoring-detail', 'monitoring-summary', 'monitoring-metrics', 'trend-section', 'trend-bars', 'empty-trend', 'sync-history',];
+    ['auth-loading', 'spinning', 'login-page', 'login-panel', 'login-brand', 'brand-mark', 'login-submit', 'app-shell', 'sidebar', 'brand', 'brand-mark', 'scope-label', 'nav-item', 'active', 'nav-arrow', 'sidebar-spacer', 'integration-list', 'scope-label', 'integration-dot', 'connected', 'operator', 'avatar', 'main-area', 'topbar', 'topbar-title', 'records-back', 'topbar-actions', 'search', 'updated', 'icon-button', 'spinning', 'secondary-button', 'spin-icon', 'secondary-button', 'spin-icon', 'primary-button', 'error-state', 'content', 'dashboard-view', 'metrics-grid', 'metric', 'metric-icon', 'blue', 'metric-arrow', 'metric', 'metric-icon', 'green', 'metric-arrow', 'metric', 'metric-icon', 'amber', 'metric-arrow', 'metric', 'metric-icon', 'red', 'metric-arrow', 'metric', 'metric-icon', 'cyan', 'metric-arrow', 'dashboard-grid', 'panel', 'span-two', 'panel-heading', 'text-button', 'asset-overview', 'asset-stat', 'health-bar', 'panel', 'panel-heading', 'pass-ring', 'mini-list', 'dot', 'panel', 'span-three', 'panel-heading', 'icon-button', 'alert-stream', 'alert-row', 'severity', 'alert-main', 'content', 'list-view', 'list-summary', 'legend', 'ok', 'warn', 'bad', 'project-grid', 'project-card', 'project-head', 'project-symbol', 'card-actions', 'danger-action', 'project-meta', 'project-footer', 'table-panel', 'asset-status', 'sync-state', 'row-actions', 'spin-icon', 'danger-action', 'inspection-center', 'inspection-view-heading', 'inspection-heading-title', 'records-back', 'plan-grid', 'plan-card', 'plan-card-head', 'plan-icon', 'plan-actions', 'plan-commands', 'spin-icon', 'plan-toggle-button', 'danger-action', 'empty-state', 'plan-empty', 'result-list', 'result-card', 'result-status', 'result-main', 'result-score', 'result-meta', 'result-executed-at', 'result-arrow', 'empty-state', 'inspection-pagination', 'table-panel', 'severity', 'editor-form', 'editor-form', 'form-grid', 'production-note', 'editor-form', 'form-grid', 'field-hint', 'drawer-footer', 'inspection-detail', 'detail-summary', 'detail-score', 'detail-counts', 'passed', 'warning', 'failed', 'detail-context', 'check-list', 'check-item', 'check-icon', 'check-content', 'monitoring-detail', 'monitoring-summary', 'monitoring-summary', 'monitoring-metrics', 'trend-section', 'trend-bars', 'empty-trend', 'sync-history',];
     var __VLS_slots;
     var $slots;
     let __VLS_inheritedAttrs;

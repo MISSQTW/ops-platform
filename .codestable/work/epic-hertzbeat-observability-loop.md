@@ -3,8 +3,8 @@ epic: ../epics/hertzbeat-observability-loop.md
 phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
 current_item: null
-next_action: 验证数字监控状态修复后的线上结果，保留 owner 验收驳回状态
-blocked_by: null
+next_action: 磁盘空间稳定充足、OrbStack 恢复后先删除临时资产 id=37 及外部监控 696014098024960，再补验故障→恢复与真实告警；禁止继续积累测试资产
+blocked_by: OrbStack 恢复后再次退出为 Stopped，磁盘可用空间由约 5 GB 降至 1.1 GB；平台端口拒绝连接
 item_progression: continuous
 milestone_commit: authorized
 remote_publish: manual
@@ -51,3 +51,9 @@ remote_publish: manual
 - 已按本机实际常量补齐数字状态映射，保留指标时间读取且不让历史非空指标覆盖明确 DOWN；新增数字 UP/DOWN 回归测试，后端 48 项测试及打包通过。
 - 从 HertzBeat 容器实际请求 `host.docker.internal:7788/health` 和 `host.docker.internal:4173/` 均返回 Connection refused。应显示两个不可用服务，不能将异常数量 0 作为验收成功证据；前面的 0 仅证明统计公式更改，未证明状态适配正确。
 - 最新容器在线验证：手动同步 SUCCESS、更新 3 个资产；libo-backend/libo-h5 均为 DOWN，libo-postgresql 为 UP 且采样新鲜，异常数量为 2。详情无采样提示已移除“当前状态待采样”的推断，UNKNOWN 统一显示“状态未知”。Owner 未接受，Epic 保持 active。
+- 补验正常→故障→恢复使用独立临时资产。首轮 assetId=4 已观察到 HertzBeat 成功采集，但验收脚本时间解析失败，已通过 API 删除资产和外部监控。
+- 第二轮 assetId=5 / monitorId=696013413284096 在系统磁盘耗尽、Docker 退出期间中断；平台连接被拒绝，自动清理未完成。恢复后必须优先清理该测试资产，不能把这一轮报告为通过。
+- README 已补状态解释；详情 UI 已补监控类型、同步尝试/成功时间及具体错误，前端构建通过。但最新 UI 的 Docker 部署因 no space left on device 失败，尚未上线。
+- 后续环境恢复尝试：启动 OrbStack 和项目服务成功，通过 API 删除遗留临时资产 5（HTTP 204）。镜像源 TLS 超时后将本地 dist 复制至 Web 容器，并保存为本地镜像 ops-platform-web:latest（40aeb252585e）。最新 UI 当时已部署。
+- 新一轮临时资产 37 / monitorId=696014098024960 已通过真实正常阶段：UP、metricsStale=false、采样时间 2026-10-19T17:29:28.226。切换 web:9 后，OrbStack 再次停止，测试和自动清理因连接拒绝中断；不能声明故障/恢复链路通过。
+- HertzBeat 当前 firing/resolved API 均返回空列表，所以尚无真实告警触发及恢复证据，不能用状态正常阶段通过替代告警闭环验收。

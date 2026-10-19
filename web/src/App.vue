@@ -676,6 +676,8 @@ onMounted(initializeAuth)
       <div class="monitoring-detail" v-loading="monitoringDetailLoading">
         <template v-if="monitoringDetails">
           <div class="monitoring-summary"><div><span>运行状态</span><strong>{{ statusText(monitoringDetails.asset.status) }}</strong></div><div><span>监控 ID</span><strong>{{ monitoringDetails.asset.hertzbeatMonitorId || '--' }}</strong></div><div><span>最近采集</span><strong>{{ monitoringDetails.asset.lastCollectedAt ? formatTime(monitoringDetails.asset.lastCollectedAt) : '--' }}</strong></div></div>
+          <div class="monitoring-summary"><div><span>监控类型</span><strong>{{ monitoringDetails.asset.type }}</strong></div><div><span>最近同步尝试</span><strong>{{ monitoringDetails.asset.lastSyncAttemptAt ? formatTime(monitoringDetails.asset.lastSyncAttemptAt) : '尚未尝试' }}</strong></div><div><span>最近同步成功</span><strong>{{ monitoringDetails.asset.lastSuccessfulSyncAt ? formatTime(monitoringDetails.asset.lastSuccessfulSyncAt) : '尚未成功' }}</strong></div></div>
+          <el-alert v-if="monitoringDetails.asset.monitoringError" :title="monitoringDetails.asset.monitoringError" type="warning" :closable="false" show-icon />
           <el-alert v-if="!monitoringDetails.metricsCollectedAt" title="暂无指标采样；服务可用性以监控状态为准" type="info" :closable="false" show-icon />
           <el-alert v-else-if="monitoringDetails.metricsStale" title="当前指标超过 180 秒未更新，数据已陈旧" type="warning" :closable="false" show-icon />
           <el-alert v-if="monitoringDetails.metricsMessage" :title="monitoringDetails.metricsMessage" type="info" :closable="false" show-icon />
