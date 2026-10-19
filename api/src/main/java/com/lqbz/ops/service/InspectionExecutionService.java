@@ -73,8 +73,7 @@ public class InspectionExecutionService {
     for (int index = 0; index < projectAssets.size(); index++) {
       Asset asset = projectAssets.get(index);
       CheckResult result = results.get(index);
-      asset.update(asset.getName(), asset.getProjectName(), asset.getEnvironmentName(), asset.getType(),
-          asset.getEndpoint(), result.passed() ? "HEALTHY" : "CRITICAL");
+      asset.applyInspectionStatus(result.passed() ? "HEALTHY" : "CRITICAL");
       inspectionItems.save(new InspectionItem(inspection.getId(), asset.getType(), asset.getName(),
           checkName(asset), result.passed() ? "PASSED" : "FAILED", result.message(), result.durationMillis()));
     }

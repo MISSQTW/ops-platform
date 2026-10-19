@@ -19,15 +19,26 @@ export type Asset = {
   syncStatus: string
   syncMessage: string | null
   lastSyncedAt: string | null
+  monitoringMode: string
+  mappingStatus: string
+  monitoringStale: boolean
+  lastCollectedAt: string | null
+  lastSyncAttemptAt: string | null
+  lastSuccessfulSyncAt: string | null
+  monitoringError: string | null
 }
 export type AssetInput = Pick<Asset, 'name' | 'projectName' | 'environmentName' | 'type' | 'endpoint' | 'status'>
 export type Inspection = { id: number; name: string; projectName: string; status: string; passedChecks: number; totalChecks: number; durationSeconds: number; executedAt: string }
 export type InspectionPlan = { id: number; name: string; projectName: string; scopeText: string; scheduleText: string; status: string; nextRunAt: string }
 export type InspectionPlanInput = Omit<InspectionPlan, 'id' | 'status'> & { status?: string }
 export type InspectionItem = { id: number; inspectionId: number; category: string; targetName: string; checkName: string; status: string; message: string; durationMillis: number }
-export type Alert = { id: number; level: string; projectName: string; targetName: string; message: string; status: string; occurredAt: string }
+export type Alert = { id: number; level: string; projectName: string; targetName: string; message: string; status: string; occurredAt: string; externalLifecycle?: string }
 export type IntegrationStatus = { connected: boolean; endpoint: string; durationMillis: number; message: string }
 export type AssetSyncAllResult = { total: number; succeeded: number; failed: number; assets: Asset[] }
+export type SessionUser = { username: string; displayName: string; canManageIntegrations: boolean }
+export type MonitoringMetric = { name: string; value: number | null; booleanValue: boolean | null; unit: string | null; collectedAt: string | null }
+export type MonitoringDetails = { asset: Asset; latestMetrics: MonitoringMetric[]; history: MonitoringMetric[]; metricsMessage: string | null }
+export type MonitoringSyncRun = { id: number; triggerType: string; status: string; startedAt: string; finishedAt: string | null; assetsUpdated: number; alertsUpdated: number; errorSummary: string | null }
 
 let authToken = localStorage.getItem('ops_token') || ''
 
@@ -66,9 +77,9 @@ async function mutate<T>(path: string, method: string, body?: unknown): Promise<
 }
 
 export const api = {
-  login: (username: string, password: string) => mutate<{ token: string; username: string; displayName: string }>('/auth/login', 'POST', { username, password }),
+  login: (username: string, password: string) => mutate<SessionUser & { token: string }>('/auth/login', 'POST', { username, password }),
   logout: () => mutate<void>('/auth/logout', 'POST'),
-  me: () => request<{ username: string; displayName: string }>('/auth/me'),
+  me: () => request<SessionUser>('/auth/me'),
   summary: () => request<Summary>('/dashboard/summary'),
   projects: () => request<Project[]>('/projects'),
   assets: () => request<Asset[]>('/assets'),
@@ -79,6 +90,9 @@ export const api = {
   hertzBeatStatus: () => request<IntegrationStatus>('/integrations/hertzbeat/status'),
   syncAssetToHertzBeat: (id: number) => mutate<Asset>(`/integrations/hertzbeat/assets/${id}/sync`, 'POST'),
   syncAllAssetsToHertzBeat: () => mutate<AssetSyncAllResult>('/integrations/hertzbeat/assets/sync-all', 'POST'),
+  syncMonitoringData: () => mutate<MonitoringSyncRun>('/integrations/hertzbeat/monitoring/sync', 'POST'),
+  monitoringRuns: () => request<MonitoringSyncRun[]>('/integrations/hertzbeat/monitoring/runs'),
+  monitoringDetails: (id: number) => request<MonitoringDetails>(`/integrations/hertzbeat/assets/${id}/details`),
   createProject: (data: Omit<Project, 'id' | 'status'> & { status?: string }) => mutate<Project>('/projects', 'POST', data),
   updateProject: (id: number, data: Omit<Project, 'id'>) => mutate<Project>(`/projects/${id}`, 'PUT', data),
   deleteProject: (id: number) => mutate<void>(`/projects/${id}`, 'DELETE'),

@@ -5,6 +5,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.lqbz.ops.domain.Asset;
+import com.lqbz.ops.domain.AssetRepository;
+import com.lqbz.ops.domain.MonitoringSyncRunRepository;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +19,7 @@ class MonitoringIntegrationControllerTest {
     asset.markSynced(321L, "同步成功");
     when(syncService.sync(1L)).thenReturn(asset);
 
-    MonitoringIntegrationController controller = new MonitoringIntegrationController(client, syncService);
+    MonitoringIntegrationController controller = controller(client, syncService);
 
     assertThat(controller.syncAsset(1L).getHertzbeatMonitorId()).isEqualTo(321L);
   }
@@ -28,9 +30,14 @@ class MonitoringIntegrationControllerTest {
     AssetMonitoringSyncService syncService = mock(AssetMonitoringSyncService.class);
     when(syncService.syncAll()).thenReturn(new AssetMonitoringSyncService.SyncAllResult(3, 2, 1, List.of()));
 
-    MonitoringIntegrationController controller = new MonitoringIntegrationController(client, syncService);
+    MonitoringIntegrationController controller = controller(client, syncService);
 
     assertThat(controller.syncAllAssets().succeeded()).isEqualTo(2);
     assertThat(controller.syncAllAssets().failed()).isEqualTo(1);
+  }
+
+  private MonitoringIntegrationController controller(HertzBeatClient client, AssetMonitoringSyncService syncService) {
+    return new MonitoringIntegrationController(client, syncService, mock(MonitoringSyncCoordinator.class),
+        mock(MonitoringSyncRunRepository.class), mock(AssetRepository.class), mock(MonitoringMetricsService.class));
   }
 }

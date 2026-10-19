@@ -10,6 +10,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +69,11 @@ public class HertzBeatClient {
     monitor.put("status", 1);
     monitor.put("type", 0);
     monitor.put("description", asset.getProjectName() + " / " + asset.getEnvironmentName());
+    Map<String, String> labels = new LinkedHashMap<>();
+    labels.put("project", asset.getProjectName());
+    labels.put("environment", asset.getEnvironmentName());
+    if (asset.getId() != null) labels.put("assetId", String.valueOf(asset.getId()));
+    monitor.put("labels", labels);
     Map<String, Object> body = Map.of("monitor", monitor, "params", enrichParams(target.params(), existingMonitorId, existing));
     URI requestUri = URI.create(baseUrl + "/api/monitor");
     HttpRequest.BodyPublisher requestBody = HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body));
@@ -83,6 +93,150 @@ public class HertzBeatClient {
     if (monitorId <= 0 && existingMonitorId == null) monitorId = findMonitorId(token, asset.getName(), target.app());
     if (monitorId <= 0) throw new IllegalStateException("HertzBeat 未返回监控 ID");
     return new SyncResult(monitorId, "同步成功");
+  }
+
+  public MonitorStatus monitorStatus(long monitorId) throws Exception {
+    String token = login();
+    JsonNode data = getJson(token, "/api/monitor/" + monitorId).path("data");
+    JsonNode monitor = data.has("monitor") ? data.path("monitor") : data;
+    if (monitor.isMissingNode() || monitor.isNull()) return new MonitorStatus("UNKNOWN", null, false);
+    JsonNode runtimeStatus = first(monitor, "monitorStatus", "available", "availability", "state");
+    String status = mapRuntimeStatus(runtimeStatus);
+    boolean disabled = monitor.path("status").isNumber() && monitor.path("status").asInt() == 0;
+    if (disabled) status = "UNKNOWN";
+    LocalDateTime collectedAt = parseTime(first(monitor, "lastCollectTime", "lastUpdateTime", "updateTime"));
+    if (!disabled && "UNKNOWN".equals(status)) {
+      JsonNode metrics = getJson(token, "/api/monitor/" + monitorId + "/metrics/summary").path("data");
+      collectedAt = parseTime(metrics.path("time"));
+      if (metrics.path("valueRows").isArray() && !metrics.path("valueRows").isEmpty()) status = "UP";
+    }
+    return new MonitorStatus(status, collectedAt, disabled);
+  }
+
+  public List<ExternalAlert> alerts(String status) throws Exception {
+    String token = login();
+    List<ExternalAlert> results = new ArrayList<>();
+    for (int pageIndex = 0; pageIndex < 1000; pageIndex++) {
+      String query = "/api/alerts?status=" + URLEncoder.encode(status, StandardCharsets.UTF_8)
+          + "&pageIndex=" + pageIndex + "&pageSize=1000";
+      JsonNode data = getJson(token, query).path("data");
+      JsonNode content = data.has("content") ? data.path("content") : data;
+      if (!content.isArray()) throw new IllegalStateException("HertzBeat 告警分页响应缺少 content");
+      for (JsonNode item : content) {
+        String externalId = text(first(item, "id", "alertId"));
+        long monitorId = number(first(item, "monitorId", "targetId", "monitor"));
+        if (externalId.isBlank() || monitorId <= 0) continue;
+        LocalDateTime startedAt = parseTime(first(item, "firstTriggerTime", "startAt", "occurredAt", "lastTriggerTime"));
+        LocalDateTime resolvedAt = parseTime(first(item, "endTime", "resolvedAt", "lastRecoverTime"));
+        results.add(new ExternalAlert(externalId, monitorId, text(first(item, "priority", "level", "severity")),
+            text(first(item, "content", "message", "name")), startedAt, resolvedAt));
+      }
+      boolean last = data.path("last").asBoolean(false);
+      int totalPages = data.path("totalPages").asInt(-1);
+      if (last || totalPages >= 0 && pageIndex + 1 >= totalPages || totalPages < 0 && content.size() < 1000) return results;
+    }
+    throw new IllegalStateException("HertzBeat 告警分页超过安全上限");
+  }
+
+  public MetricResult metrics(long monitorId, String instance, String app) throws Exception {
+    String token = login();
+    JsonNode current = getJson(token, "/api/monitor/" + monitorId + "/metrics/summary").path("data");
+    LocalDateTime collectedAt = parseTime(current.path("time"));
+    List<MonitoringMetric> latest = new ArrayList<>();
+    if (!current.path("valueRows").isEmpty()) latest.add(MonitoringMetric.availability(true, collectedAt));
+    JsonNode fields = current.path("fields");
+    JsonNode values = current.path("valueRows").isArray() && !current.path("valueRows").isEmpty()
+        ? current.path("valueRows").get(0).path("values") : objectMapper.createArrayNode();
+    for (int index = 0; index < Math.min(fields.size(), values.size()); index++) {
+      JsonNode field = fields.get(index);
+      if (!"responseTime".equals(field.path("name").asText())) continue;
+      double value = Double.parseDouble(values.get(index).path("origin").asText("0"));
+      latest.add(MonitoringMetric.duration("responseTime", value, field.path("unit").asText("ms"),
+          parseTime(values.get(index).path("time"))));
+    }
+    String metricFull = app + ".summary.responseTime";
+    String historyPath = "/api/monitor/" + instance + "/metric/" + metricFull + "?history=1h&interval=true";
+    List<MonitoringMetric> history = new ArrayList<>();
+    JsonNode historyData = getJson(token, historyPath).path("data");
+    String unit = historyData.path("field").path("unit").asText("ms");
+    JsonNode series = historyData.path("values");
+    if (series.isObject()) {
+      series.fields().forEachRemaining(entry -> entry.getValue().forEach(value -> {
+        try {
+          history.add(MonitoringMetric.duration("responseTime", Double.parseDouble(value.path("origin").asText("0")),
+              unit, parseTime(value.path("time"))));
+        } catch (IllegalArgumentException ignored) {
+          // 单项指标解析失败时保留其他有效数据。
+        }
+      }));
+    }
+    return new MetricResult(latest, history, collectedAt);
+  }
+
+  public MetricTarget metricTarget(Asset asset) {
+    MonitorTarget target = monitorTarget(asset);
+    return new MetricTarget(target.app(), target.instance());
+  }
+
+  public void deleteMonitor(long monitorId) throws Exception {
+    String token = login();
+    HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/monitor/" + monitorId))
+        .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + token).DELETE().build();
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    if (response.statusCode() == 404) return;
+    JsonNode json = objectMapper.readTree(response.body());
+    if (json.path("msg").asText("").toLowerCase().contains("not exist")) return;
+    if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
+      throw new IllegalStateException("HertzBeat 删除监控失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
+    }
+  }
+
+  private JsonNode getJson(String token, String path) throws Exception {
+    HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        .timeout(Duration.ofSeconds(8))
+        .header("Authorization", "Bearer " + token)
+        .GET().build();
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    JsonNode json = objectMapper.readTree(response.body());
+    if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
+      throw new IllegalStateException("HertzBeat 查询失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
+    }
+    return json;
+  }
+
+  private JsonNode first(JsonNode node, String... fields) {
+    for (String field : fields) if (node.hasNonNull(field)) return node.path(field);
+    return objectMapper.missingNode();
+  }
+
+  private String text(JsonNode node) { return node.isMissingNode() ? "" : node.asText(""); }
+  private long number(JsonNode node) { return node.isNumber() ? node.asLong() : parseLong(node.asText("")); }
+  private long parseLong(String value) { try { return Long.parseLong(value); } catch (NumberFormatException ignored) { return 0; } }
+
+  private String mapRuntimeStatus(JsonNode node) {
+    if (node.isBoolean()) return node.asBoolean() ? "UP" : "DOWN";
+    String value = node.asText("").toUpperCase();
+    return switch (value) {
+      case "UP", "AVAILABLE", "HEALTHY", "SUCCESS", "TRUE" -> "UP";
+      case "DOWN", "UNAVAILABLE", "CRITICAL", "FAILED", "FALSE" -> "DOWN";
+      default -> "UNKNOWN";
+    };
+  }
+
+  private LocalDateTime parseTime(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull()) return null;
+    if (node.isNumber()) {
+      long value = node.asLong();
+      if (value < 10_000_000_000L) value *= 1000;
+      return LocalDateTime.ofInstant(Instant.ofEpochMilli(value), ZoneId.systemDefault());
+    }
+    String value = node.asText("");
+    if (value.isBlank()) return null;
+    try { return LocalDateTime.parse(value); }
+    catch (DateTimeParseException ignored) {
+      try { return LocalDateTime.ofInstant(Instant.parse(value), ZoneId.systemDefault()); }
+      catch (DateTimeParseException ignoredAgain) { return null; }
+    }
   }
 
   private JsonNode getMonitorDetails(String token, long monitorId) throws Exception {
@@ -187,5 +341,11 @@ public class HertzBeatClient {
 
   public record Status(boolean connected, String endpoint, long durationMillis, String message) {}
   public record SyncResult(long monitorId, String message) {}
+  public record MonitorStatus(String status, LocalDateTime collectedAt, boolean disabled) {}
+  public record ExternalAlert(String externalId, long monitorId, String level, String message,
+                              LocalDateTime occurredAt, LocalDateTime resolvedAt) {}
+  public record MetricResult(List<MonitoringMetric> latest, List<MonitoringMetric> history,
+                             LocalDateTime collectedAt) {}
+  public record MetricTarget(String app, String instance) {}
   private record MonitorTarget(String app, String instance, List<Map<String, Object>> params) {}
 }

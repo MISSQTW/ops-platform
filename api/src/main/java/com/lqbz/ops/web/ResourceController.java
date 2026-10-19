@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import com.lqbz.ops.domain.*;
 import com.lqbz.ops.service.InspectionExecutionService;
+import com.lqbz.ops.integration.MonitoringCleanupService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -29,10 +30,12 @@ public class ResourceController {
   private final InspectionPlanRepository inspectionPlans;
   private final InspectionItemRepository inspectionItems;
   private final InspectionExecutionService inspectionExecutionService;
+  private final MonitoringCleanupService monitoringCleanupService;
 
   public ResourceController(ProjectRepository projects, AssetRepository assets, InspectionRepository inspections,
       AlertRepository alerts, AuditLogRepository audits, InspectionPlanRepository inspectionPlans,
-      InspectionItemRepository inspectionItems, InspectionExecutionService inspectionExecutionService) {
+      InspectionItemRepository inspectionItems, InspectionExecutionService inspectionExecutionService,
+      MonitoringCleanupService monitoringCleanupService) {
     this.projects = projects;
     this.assets = assets;
     this.inspections = inspections;
@@ -41,6 +44,7 @@ public class ResourceController {
     this.inspectionPlans = inspectionPlans;
     this.inspectionItems = inspectionItems;
     this.inspectionExecutionService = inspectionExecutionService;
+    this.monitoringCleanupService = monitoringCleanupService;
   }
 
   @GetMapping("/projects") public List<Project> projects() { return projects.findAll(Sort.by("id")); }
@@ -140,6 +144,7 @@ public class ResourceController {
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteAsset(@PathVariable Long id) {
     Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("资产不存在"));
+    monitoringCleanupService.cleanupOrSchedule(asset);
     assets.delete(asset);
     audits.save(new AuditLog("DELETE_ASSET", "ASSET", asset.getName()));
   }

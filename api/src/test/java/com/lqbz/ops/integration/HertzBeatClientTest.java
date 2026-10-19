@@ -37,6 +37,11 @@ class HertzBeatClientTest {
       requests.add(capture(exchange));
       respond(exchange, 200, "{\"code\":0,\"data\":null}");
     });
+    server.createContext("/api/monitor/321/metrics/summary", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"time\":1792384800000,\"fields\":[{\"name\":\"responseTime\",\"unit\":\"ms\"}],\"valueRows\":[{\"values\":[{\"origin\":\"86\",\"time\":1792384800000}]}]}}"));
+    server.createContext("/api/monitor/order.example.com:443/metric/website.summary.responseTime", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"field\":{\"name\":\"responseTime\",\"unit\":\"ms\"},\"values\":{\"default\":[{\"origin\":\"82\",\"time\":1792381200000},{\"origin\":\"86\",\"time\":1792384800000}]}}}"));
+    server.createContext("/api/monitor/999", exchange -> respond(exchange, 404, ""));
     server.start();
     client = new HertzBeatClient(objectMapper, "http://localhost:" + server.getAddress().getPort(), "admin", "hertzbeat");
   }
@@ -56,6 +61,8 @@ class HertzBeatClientTest {
     assertThat(requests).hasSize(1);
     JsonNode body = objectMapper.readTree(requests.getFirst().body());
     assertThat(body.path("monitor").path("app").asText()).isEqualTo("website");
+    assertThat(body.path("monitor").path("labels").path("project").asText()).isEqualTo("订单平台");
+    assertThat(body.path("monitor").path("labels").path("environment").asText()).isEqualTo("生产");
     assertThat(body.path("monitor").path("name").asText()).isEqualTo("订单接口");
     assertThat(body.path("params").toString()).contains("order.example.com", "ssl", "true");
     assertThat(requests.getFirst().authorization()).isEqualTo("Bearer test-token");
@@ -85,6 +92,21 @@ class HertzBeatClientTest {
     assertThat(objectMapper.readTree(requests.getFirst().body()).path("monitor").path("id").asLong()).isEqualTo(321L);
     assertThat(objectMapper.readTree(requests.getFirst().body()).path("monitor").path("jobId").asLong()).isEqualTo(654L);
     assertThat(objectMapper.readTree(requests.getFirst().body()).path("params").get(0).path("id").asLong()).isEqualTo(11L);
+  }
+
+  @Test
+  void 应解析实时指标和最近一小时趋势() throws Exception {
+    HertzBeatClient.MetricResult result = client.metrics(321L, "order.example.com:443", "website");
+
+    assertThat(result.latest()).extracting(MonitoringMetric::name).contains("availability", "responseTime");
+    assertThat(result.latest()).filteredOn(metric -> "responseTime".equals(metric.name()))
+        .extracting(MonitoringMetric::value).containsExactly(86L);
+    assertThat(result.history()).hasSize(2);
+  }
+
+  @Test
+  void 删除不存在的监控应视为幂等成功() throws Exception {
+    client.deleteMonitor(999L);
   }
 
   private CapturedRequest capture(HttpExchange exchange) throws IOException {

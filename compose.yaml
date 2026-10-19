@@ -65,7 +65,7 @@ services:
       - vm-data:/storage
 
   hertzbeat:
-    image: m.daocloud.io/docker.io/apache/hertzbeat:latest
+    image: m.daocloud.io/docker.io/apache/hertzbeat@sha256:ec18b68592f173e54654defb1c56ca4f1fd57911e1c2f5a9bbb7fb32f4be37e4
     ports:
       - "1157:1157"
     volumes:

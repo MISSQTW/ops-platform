@@ -27,15 +27,16 @@ public class AuthController {
   public Map<String, Object> status() { return Map.of("enabled", enabled); }
 
   @PostMapping("/login")
-  public Map<String, String> login(@RequestBody LoginRequest request) {
+  public Map<String, Object> login(@RequestBody LoginRequest request) {
     String token = sessions.login(request.username(), request.password());
     if (token == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
-    return Map.of("token", token, "username", sessions.username(), "displayName", sessions.displayName());
+    return Map.of("token", token, "username", sessions.username(), "displayName", sessions.displayName(),
+        "canManageIntegrations", true);
   }
 
   @GetMapping("/me")
-  public Map<String, String> me() {
-    return Map.of("username", sessions.username(), "displayName", sessions.displayName());
+  public Map<String, Object> me() {
+    return Map.of("username", sessions.username(), "displayName", sessions.displayName(), "canManageIntegrations", true);
   }
 
   @PostMapping("/logout")

@@ -6,9 +6,10 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
-@Table(name = "ops_alert")
+@Table(name = "ops_alert", uniqueConstraints = @UniqueConstraint(columnNames = {"externalSource", "externalAlertId"}))
 public class Alert {
   @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
@@ -18,6 +19,14 @@ public class Alert {
   private String message;
   private String status;
   private LocalDateTime occurredAt;
+  private String externalSource;
+  private String externalAlertId;
+  private Long externalMonitorId;
+  private String externalLifecycle;
+  private String handlingStatus;
+  private LocalDateTime firstOccurredAt;
+  private LocalDateTime lastOccurredAt;
+  private LocalDateTime resolvedAt;
 
   protected Alert() {}
 
@@ -28,6 +37,37 @@ public class Alert {
     this.message = message;
     this.status = status;
     this.occurredAt = occurredAt;
+    this.handlingStatus = status;
+  }
+
+  public static Alert external(String source, String externalId, Long monitorId, String level, String projectName,
+      String targetName, String message, LocalDateTime occurredAt) {
+    Alert alert = new Alert(level, projectName, targetName, message, "OPEN", occurredAt);
+    alert.externalSource = source;
+    alert.externalAlertId = externalId;
+    alert.externalMonitorId = monitorId;
+    alert.externalLifecycle = "FIRING";
+    alert.handlingStatus = "OPEN";
+    alert.firstOccurredAt = occurredAt;
+    alert.lastOccurredAt = occurredAt;
+    return alert;
+  }
+
+  public void fire(String message, LocalDateTime occurredAt) {
+    this.externalLifecycle = "FIRING";
+    this.message = message;
+    this.lastOccurredAt = occurredAt;
+    this.resolvedAt = null;
+  }
+
+  public void resolve(LocalDateTime resolvedAt) {
+    this.externalLifecycle = "RESOLVED";
+    this.resolvedAt = resolvedAt;
+  }
+
+  public void acknowledge() {
+    this.handlingStatus = "ACKNOWLEDGED";
+    this.status = "ACKNOWLEDGED";
   }
 
   public Long getId() { return id; }
@@ -35,6 +75,14 @@ public class Alert {
   public String getProjectName() { return projectName; }
   public String getTargetName() { return targetName; }
   public String getMessage() { return message; }
-  public String getStatus() { return status; }
+  public String getStatus() { return handlingStatus == null ? status : handlingStatus; }
   public LocalDateTime getOccurredAt() { return occurredAt; }
+  public String getExternalSource() { return externalSource; }
+  public String getExternalAlertId() { return externalAlertId; }
+  public Long getExternalMonitorId() { return externalMonitorId; }
+  public String getExternalLifecycle() { return externalLifecycle; }
+  public String getHandlingStatus() { return handlingStatus == null ? status : handlingStatus; }
+  public LocalDateTime getFirstOccurredAt() { return firstOccurredAt; }
+  public LocalDateTime getLastOccurredAt() { return lastOccurredAt; }
+  public LocalDateTime getResolvedAt() { return resolvedAt; }
 }

@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, Settings, ShieldCheck, Trash2, XCircle } from '@lucide/vue'
-import { api, setAuthToken, type Alert, type Asset, type Inspection, type InspectionItem, type InspectionPlan, type Project, type Summary } from './api'
+import { api, setAuthToken, type Alert, type Asset, type Inspection, type InspectionItem, type InspectionPlan, type MonitoringDetails, type MonitoringSyncRun, type Project, type Summary } from './api'
 
 type ViewKey = 'dashboard' | 'projects' | 'assets' | 'inspections' | 'alerts'
 type AssetCategoryKey = 'server' | 'database' | 'middleware' | 'interfaceStorage'
@@ -11,7 +11,7 @@ const activeView = ref<ViewKey>('dashboard')
 const authenticated = ref(false)
 const authLoading = ref(true)
 const loginLoading = ref(false)
-const currentUser = reactive({ username: '', displayName: '' })
+const currentUser = reactive({ username: '', displayName: '', canManageIntegrations: false })
 const loginForm = reactive({ username: 'admin', password: '' })
 const loading = ref(true)
 const error = ref('')
@@ -44,6 +44,11 @@ const saving = ref(false)
 const runningPlanId = ref<number | null>(null)
 const syncingAssetId = ref<number | null>(null)
 const syncingAllAssets = ref(false)
+const syncingMonitoring = ref(false)
+const monitoringRuns = ref<MonitoringSyncRun[]>([])
+const monitoringDrawerVisible = ref(false)
+const monitoringDetailLoading = ref(false)
+const monitoringDetails = ref<MonitoringDetails | null>(null)
 const projectForm = reactive({ name: '', owner: '', description: '', status: 'RUNNING' })
 const assetForm = reactive({ name: '', projectName: '', environmentName: '生产', type: 'SERVER', endpoint: '', status: 'UNKNOWN' })
 const planForm = reactive({ name: '', projectName: '', scopeText: '', scheduleText: '每 5 分钟', status: 'ENABLED', nextRunAt: '' })
@@ -220,7 +225,7 @@ function badge(status: string) {
 function statusText(status: string) {
   const mapping: Record<string, string> = {
     RUNNING: '运行中', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
-    PASSED: '通过', FAILED: '失败', OPEN: '待处理', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '未知',
+    PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '未知',
     ENABLED: '已启用', DISABLED: '已停用',
   }
   return mapping[status] ?? status
@@ -258,8 +263,8 @@ async function loadData() {
   loading.value = true
   error.value = ''
   try {
-    const [summaryData, projectData, assetData, inspectionData, planData, alertData, hertzBeatStatus] = await Promise.all([
-      api.summary(), api.projects(), api.assets(), api.inspections(), api.inspectionPlans(), api.alerts(), api.hertzBeatStatus(),
+    const [summaryData, projectData, assetData, inspectionData, planData, alertData] = await Promise.all([
+      api.summary(), api.projects(), api.assets(), api.inspections(), api.inspectionPlans(), api.alerts(),
     ])
     summary.value = summaryData
     projects.value = projectData
@@ -267,7 +272,13 @@ async function loadData() {
     inspections.value = inspectionData
     inspectionPlans.value = planData
     alerts.value = alertData
-    hertzBeatConnected.value = hertzBeatStatus.connected
+    try {
+      const [hertzBeatStatus, runData] = await Promise.all([api.hertzBeatStatus(), api.monitoringRuns()])
+      hertzBeatConnected.value = hertzBeatStatus.connected
+      monitoringRuns.value = runData
+    } catch {
+      hertzBeatConnected.value = false
+    }
     lastUpdated.value = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date())
   } catch (reason) {
     if (reason instanceof Error && reason.message === 'AUTH_REQUIRED') {
@@ -300,7 +311,7 @@ async function login() {
   try {
     const session = await api.login(loginForm.username, loginForm.password)
     setAuthToken(session.token)
-    Object.assign(currentUser, { username: session.username, displayName: session.displayName })
+    Object.assign(currentUser, session)
     authenticated.value = true
     loginForm.password = ''
     await loadData()
@@ -436,6 +447,37 @@ async function syncAllAssets() {
   }
 }
 
+async function syncMonitoringData() {
+  syncingMonitoring.value = true
+  try {
+    const run = await api.syncMonitoringData()
+    ElMessage[run.status === 'SUCCESS' ? 'success' : run.status === 'SKIPPED' ? 'warning' : 'error'](
+      run.status === 'SUCCESS' ? `监控数据已更新：状态 ${run.assetsUpdated} 项，告警 ${run.alertsUpdated} 项` : run.errorSummary || '已有同步任务正在运行',
+    )
+    await loadData()
+  } finally {
+    syncingMonitoring.value = false
+  }
+}
+
+async function openMonitoringDetails(item: Asset) {
+  monitoringDrawerVisible.value = true
+  monitoringDetailLoading.value = true
+  monitoringDetails.value = null
+  try { monitoringDetails.value = await api.monitoringDetails(item.id) }
+  catch (reason) { ElMessage.error(reason instanceof Error ? reason.message : '监控详情加载失败') }
+  finally { monitoringDetailLoading.value = false }
+}
+
+function metricLabel(name: string) {
+  return name === 'availability' ? '可用性' : name === 'responseTime' ? '响应时间' : name === 'httpStatus' ? 'HTTP 状态码' : name
+}
+
+function metricValue(metric: MonitoringDetails['latestMetrics'][number]) {
+  if (metric.booleanValue !== null) return metric.booleanValue ? '可用' : '不可用'
+  return `${metric.value ?? '--'}${metric.unit ? ` ${metric.unit}` : ''}`
+}
+
 async function togglePlan(item: InspectionPlan) {
   const status = item.status === 'ENABLED' ? 'DISABLED' : 'ENABLED'
   await api.updateInspectionPlan(item.id, { ...item, status })
@@ -504,7 +546,7 @@ onMounted(initializeAuth)
         </button>
       </nav>
       <div class="sidebar-spacer" />
-      <div class="integration-list">
+      <div v-if="currentUser.canManageIntegrations" class="integration-list">
         <div class="scope-label">监控组件</div>
         <a href="http://localhost:1157" target="_blank"><CloudCog :size="17" /><span>HertzBeat <i class="integration-dot" :class="{ connected: hertzBeatConnected }" /></span><ExternalLink :size="13" /></a>
         <a href="http://localhost:8428/vmui" target="_blank"><Activity :size="17" /><span>VictoriaMetrics</span><ExternalLink :size="13" /></a>
@@ -519,7 +561,8 @@ onMounted(initializeAuth)
           <div class="search"><Search :size="17" /><input v-model="keyword" placeholder="搜索当前视图" /></div>
           <span class="updated">更新于 {{ lastUpdated || '--:--:--' }}</span>
           <button class="icon-button" title="刷新数据" :disabled="loading" @click="loadData"><RefreshCw :size="17" :class="{ spinning: loading }" /></button>
-          <button v-if="activeView === 'assets'" class="secondary-button" :disabled="syncingAllAssets" @click="syncAllAssets"><RefreshCw :size="16" :class="{ 'spin-icon': syncingAllAssets }" />一键同步</button>
+          <button v-if="activeView === 'assets'" class="secondary-button" :disabled="syncingAllAssets" @click="syncAllAssets"><RefreshCw :size="16" :class="{ 'spin-icon': syncingAllAssets }" />同步资产</button>
+          <button v-if="activeView === 'assets' || activeView === 'alerts'" class="secondary-button" :disabled="syncingMonitoring" @click="syncMonitoringData"><Activity :size="16" :class="{ 'spin-icon': syncingMonitoring }" />同步监控数据</button>
           <button v-if="activeView === 'projects' || activeView === 'assets' || (activeView === 'inspections' && inspectionSection === 'plans')" class="primary-button" @click="openCreate"><Plus :size="16" />新增{{ activeView === 'projects' ? '项目' : activeView === 'assets' ? '服务' : '计划' }}</button>
         </div>
       </header>
@@ -562,7 +605,7 @@ onMounted(initializeAuth)
           <article v-for="item in filteredProjects" :key="item.id" class="project-card"><div class="project-head"><div class="project-symbol">{{ item.name.slice(0, 1) }}</div><div class="card-actions"><el-tag :type="badge(item.status)" effect="light">{{ statusText(item.status) }}</el-tag><button title="编辑项目" @click="openProjectEdit(item)"><Pencil :size="15" /></button><button title="删除项目" class="danger-action" @click="removeProject(item)"><Trash2 :size="15" /></button></div></div><h3>{{ item.name }}</h3><p>{{ item.description }}</p><div class="project-meta"><span>负责人</span><strong>{{ item.owner }}</strong></div><div class="project-footer"><button @click="openProjectServices(item)"><Server :size="14" />{{ assets.filter(asset => asset.projectName === item.name).length }} 项服务<ChevronRight :size="14" /></button><button @click="openProjectAlerts(item)"><AlertTriangle :size="14" />{{ alerts.filter(alert => alert.projectName === item.name && alert.status === 'OPEN').length }} 个告警<ChevronRight :size="14" /></button></div></article>
         </div>
 
-        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="140" /><el-table-column prop="endpoint" label="连接地址" min-width="210" /><el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag></template></el-table-column><el-table-column label="监控同步" width="120"><template #default="scope"><el-tooltip :content="scope.row.syncMessage || '尚未同步到 HertzBeat'" placement="top"><el-tag :type="scope.row.syncStatus === 'SYNCED' ? 'success' : scope.row.syncStatus === 'FAILED' ? 'danger' : 'info'" effect="light">{{ scope.row.syncStatus === 'SYNCED' ? '已同步' : scope.row.syncStatus === 'FAILED' ? '同步失败' : '未同步' }}</el-tag></el-tooltip></template></el-table-column><el-table-column label="操作" width="135" fixed="right"><template #default="scope"><div class="row-actions"><button :title="scope.row.syncStatus === 'SYNCED' ? '重新同步到 HertzBeat' : '同步到 HertzBeat'" :disabled="syncingAssetId === scope.row.id" @click="syncAsset(scope.row)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingAssetId === scope.row.id }" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
+        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="120" /><el-table-column prop="endpoint" label="连接地址" min-width="190" /><el-table-column label="运行状态" width="120"><template #default="scope"><div class="asset-status"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag><span v-if="scope.row.monitoringStale">数据已陈旧</span></div></template></el-table-column><el-table-column label="监控同步" width="150"><template #default="scope"><el-tooltip :content="scope.row.monitoringError || scope.row.syncMessage || '尚未同步到 HertzBeat'" placement="top"><div class="sync-state"><el-tag :type="scope.row.mappingStatus === 'MANAGED' ? 'success' : scope.row.mappingStatus === 'INVALIDATED' ? 'danger' : 'info'" effect="light">{{ scope.row.mappingStatus === 'MANAGED' ? 'HertzBeat 管理' : scope.row.mappingStatus === 'INVALIDATED' ? '映射失效' : '本地巡检' }}</el-tag><span>{{ scope.row.lastSuccessfulSyncAt ? formatTime(scope.row.lastSuccessfulSyncAt) : '未回写' }}</span></div></el-tooltip></template></el-table-column><el-table-column label="操作" width="170" fixed="right"><template #default="scope"><div class="row-actions"><button title="监控详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button :title="scope.row.syncStatus === 'SYNCED' ? '重新同步到 HertzBeat' : '同步到 HertzBeat'" :disabled="syncingAssetId === scope.row.id" @click="syncAsset(scope.row)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingAssetId === scope.row.id }" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
 
         <div v-if="activeView === 'inspections'" class="inspection-center">
           <div class="inspection-view-heading"><div class="inspection-heading-title"><button v-if="inspectionSection === 'results' && selectedInspectionPlan" class="records-back" title="返回巡检计划" @click="backToPlans"><ArrowLeft :size="18" /></button><div><h2>{{ inspectionSection === 'plans' ? '巡检计划列表' : selectedInspectionPlan ? `${selectedInspectionPlan.name} · 执行记录` : '执行记录' }}</h2><p v-if="inspectionSection === 'plans'">配置巡检周期并管理自动执行任务</p></div></div></div>
@@ -583,7 +626,7 @@ onMounted(initializeAuth)
           </div>
         </div>
 
-        <div v-if="activeView === 'alerts'" class="table-panel"><el-table :data="filteredAlerts" stripe><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column prop="message" label="告警内容" min-width="250" /><el-table-column prop="projectName" label="所属项目" min-width="160" /><el-table-column prop="targetName" label="告警对象" min-width="160" /><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag></template></el-table-column></el-table></div>
+        <div v-if="activeView === 'alerts'" class="table-panel"><el-table :data="filteredAlerts" stripe><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column prop="message" label="告警内容" min-width="250" /><el-table-column prop="projectName" label="所属项目" min-width="160" /><el-table-column prop="targetName" label="告警对象" min-width="160" /><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="外部状态" width="100"><template #default="scope"><el-tag :type="scope.row.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(scope.row.externalLifecycle || 'FIRING') }}</el-tag></template></el-table-column><el-table-column label="处置状态" width="110"><template #default="scope"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag></template></el-table-column></el-table></div>
       </section>
     </main>
 
@@ -622,6 +665,19 @@ onMounted(initializeAuth)
         <div class="check-list">
           <article v-for="check in inspectionItems" :key="check.id" class="check-item" :class="check.status.toLowerCase()"><div class="check-icon"><CheckCircle2 v-if="check.status === 'PASSED'" :size="18" /><AlertTriangle v-else-if="check.status === 'WARNING'" :size="18" /><XCircle v-else :size="18" /></div><div class="check-content"><div><strong>{{ check.checkName }}</strong><span>{{ check.targetName }}</span></div><p>{{ check.message }}</p></div><time>{{ check.durationMillis }}ms</time></article>
         </div>
+      </div>
+    </el-drawer>
+
+    <el-drawer v-model="monitoringDrawerVisible" :title="monitoringDetails ? `监控详情 · ${monitoringDetails.asset.name}` : '监控详情'" size="560px">
+      <div class="monitoring-detail" v-loading="monitoringDetailLoading">
+        <template v-if="monitoringDetails">
+          <div class="monitoring-summary"><div><span>运行状态</span><strong>{{ statusText(monitoringDetails.asset.status) }}</strong></div><div><span>监控 ID</span><strong>{{ monitoringDetails.asset.hertzbeatMonitorId || '--' }}</strong></div><div><span>最近采集</span><strong>{{ monitoringDetails.asset.lastCollectedAt ? formatTime(monitoringDetails.asset.lastCollectedAt) : '--' }}</strong></div></div>
+          <el-alert v-if="monitoringDetails.asset.monitoringStale" title="当前展示的是最后一次有效数据，数据已陈旧" type="warning" :closable="false" show-icon />
+          <el-alert v-if="monitoringDetails.metricsMessage" :title="monitoringDetails.metricsMessage" type="info" :closable="false" show-icon />
+          <div class="monitoring-metrics"><article v-for="metric in monitoringDetails.latestMetrics" :key="metric.name"><span>{{ metricLabel(metric.name) }}</span><strong>{{ metricValue(metric) }}</strong><small>{{ metric.collectedAt ? formatTime(metric.collectedAt) : '暂无采集时间' }}</small></article></div>
+          <div class="trend-section"><h3>最近一小时响应时间</h3><div v-if="monitoringDetails.history.length" class="trend-bars"><i v-for="(point, index) in monitoringDetails.history" :key="index" :style="{ height: `${Math.max(8, Math.min(100, Number(point.value || 0) / 3))}%` }" :title="metricValue(point)" /></div><div v-else class="empty-trend">暂无趋势数据</div></div>
+          <div class="sync-history"><h3>最近同步运行</h3><div v-for="run in monitoringRuns.slice(0, 5)" :key="run.id"><el-tag :type="run.status === 'SUCCESS' ? 'success' : run.status === 'PARTIAL' ? 'warning' : 'danger'" size="small">{{ run.status }}</el-tag><span>{{ formatRecordTime(run.startedAt) }}</span><span>状态 {{ run.assetsUpdated }} / 告警 {{ run.alertsUpdated }}</span></div></div>
+        </template>
       </div>
     </el-drawer>
   </div>

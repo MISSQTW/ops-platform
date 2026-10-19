@@ -1,22 +1,22 @@
 ---
 epic: ../epics/hertzbeat-observability-loop.md
-phase: executing
+phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
-current_item: ITEM-1
-next_action: 实现 HertzBeat 外部契约、监控模式、映射生命周期和指标规范化模型
+current_item: null
+next_action: 创建 fresh acceptance reviewer，对最新里程碑逐项执行 Epic 最终验收
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
 remote_publish: manual
 ---
 ## 子项进度
-- [ ] ITEM-1
-- [ ] ITEM-2
-- [ ] ITEM-3
-- [ ] ITEM-4
-- [ ] ITEM-5
-- [ ] ITEM-6
-- [ ] ITEM-7
+- [x] ITEM-1
+- [x] ITEM-2
+- [x] ITEM-3
+- [x] ITEM-4
+- [x] ITEM-5
+- [x] ITEM-6
+- [x] ITEM-7
 
 ## 临时决策与证据
 - 现有设计明确平台管理业务元数据、HertzBeat 负责采集和告警、平台读取并映射状态：`docs/superpowers/specs/2026-10-19-ops-platform-design.md`。
@@ -26,3 +26,11 @@ remote_publish: manual
 - 第二轮设计复审无 blocking，要求继续明确映射失效后的写入权、指标规范化单位和当前单管理员系统中的导航验收构造；修订版已增加监控模式/映射生命周期、固定单位、会话能力位 fixture，并补充全局锁键与外部清理重试语义。
 - 第三轮同 lineage design review 已通过，无 blocking、important 或 nit；冻结 Epic SHA-256 为 `f8891f2a4363556635d21b5fd57abffa1ef109c6e0713e429085de8f63947ec3`。
 - 当前目录不是 Git 仓库，首次 owner gate 的合法建议策略为 `item_progression: per-item`、`milestone_commit: manual`、`remote_publish: manual`。
+- Owner 要求先初始化 Git 后连续实现；仓库已在 `main` 初始化，执行策略更新为 `continuous + authorized + remote manual`，基线提交为 `bcf966f`。
+- 后端全量 41 个测试通过，包含真实 Spring 事务回滚测试：投影事务失败后，`REQUIRES_NEW` 运行记录仍保留并落为 `FAILED`。
+- 前端 `npm run build` 通过；仅保留 Vite 现有大 chunk 警告，无构建错误。
+- 最新 JAR 已重建并更新 Docker API 镜像；`api`、`web`、PostgreSQL、Redis、HertzBeat、VictoriaMetrics 均处于运行状态，API 健康检查通过。
+- 在线验收：平台与 HertzBeat 首页均返回 200；认证连通状态为正常；手动同步运行 `id=47` 为 `SUCCESS`，更新 3 个资产；最近定时运行连续成功。
+- 在线验收：3 个资产均为 `HERTZBEAT + MANAGED`；PostgreSQL 为 `UP` 且指标新鲜，两个当前无新样本的 HTTP 资产为 `UNKNOWN + stale`，未误判为 `DOWN`。
+- 在线验收：PostgreSQL 详情返回 availability、responseTime（`ms`）和最近一小时 59 个趋势点；管理员会话返回 `canManageIntegrations=true`。
+- HertzBeat 停机降级、最后有效指标缓存、重复同步、重启补偿、监控删除幂等和外部清理重试已在前序实现验证及自动化测试中覆盖。
