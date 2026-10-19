@@ -79,9 +79,13 @@ const titles: Record<ViewKey, { title: string; description: string }> = {
 
 const filteredProjects = computed(() => projects.value.filter(item => includesKeyword(item.name, item.owner, item.description)))
 const activeServiceCategory = computed(() => assetCategories.find(item => item.key === serviceCategory.value) || null)
+const healthyStatuses = new Set(['UP', 'HEALTHY'])
+const abnormalStatuses = new Set(['DOWN', 'CRITICAL', 'FAILED'])
+const isHealthyStatus = (status: string) => healthyStatuses.has(status)
+const isAbnormalStatus = (status: string) => abnormalStatuses.has(status)
 const assetCategoryStats = computed(() => assetCategories.map(category => {
   const categoryAssets = assets.value.filter(item => category.types.includes(item.type))
-  const healthy = categoryAssets.filter(item => item.status === 'HEALTHY').length
+  const healthy = categoryAssets.filter(item => isHealthyStatus(item.status)).length
   return { ...category, count: categoryAssets.length, healthy, percentage: categoryAssets.length ? (healthy / categoryAssets.length) * 100 : 0 }
 }))
 const currentTitle = computed(() => {
@@ -92,7 +96,7 @@ const currentTitle = computed(() => {
   if (activeView.value === 'alerts' && pendingAlertsOnly.value) return { title: '待处理告警', description: '查看尚未恢复的运行告警' }
   return titles[activeView.value]
 })
-const filteredAssets = computed(() => assets.value.filter(item => (!selectedProjectName.value || item.projectName === selectedProjectName.value) && (serviceListMode.value === 'all' || item.status !== 'HEALTHY') && (!activeServiceCategory.value || activeServiceCategory.value.types.includes(item.type)) && includesKeyword(item.name, item.projectName, item.endpoint, item.type)))
+const filteredAssets = computed(() => assets.value.filter(item => (!selectedProjectName.value || item.projectName === selectedProjectName.value) && (serviceListMode.value === 'all' || isAbnormalStatus(item.status)) && (!activeServiceCategory.value || activeServiceCategory.value.types.includes(item.type)) && includesKeyword(item.name, item.projectName, item.endpoint, item.type)))
 const filteredInspections = computed(() => inspections.value.filter(item => includesKeyword(item.name, item.projectName)))
 const selectedPlanInspections = computed(() => filteredInspections.value.filter(item => !selectedInspectionPlan.value || (item.name === selectedInspectionPlan.value.name && item.projectName === selectedInspectionPlan.value.projectName)))
 const pagedPlanInspections = computed(() => selectedPlanInspections.value.slice((inspectionPage.value - 1) * inspectionPageSize, inspectionPage.value * inspectionPageSize))
@@ -216,16 +220,16 @@ function includesKeyword(...values: string[]) {
 
 function badge(status: string) {
   const mapping: Record<string, string> = {
-    RUNNING: 'success', HEALTHY: 'success', PASSED: 'success', RESOLVED: 'info',
-    MAINTENANCE: 'warning', WARNING: 'warning', OPEN: 'danger', CRITICAL: 'danger', FAILED: 'danger', INFO: 'info',
+    RUNNING: 'success', UP: 'success', HEALTHY: 'success', PASSED: 'success', RESOLVED: 'info',
+    MAINTENANCE: 'warning', WARNING: 'warning', OPEN: 'danger', DOWN: 'danger', CRITICAL: 'danger', FAILED: 'danger', INFO: 'info',
   }
   return mapping[status] ?? 'info'
 }
 
 function statusText(status: string) {
   const mapping: Record<string, string> = {
-    RUNNING: '运行中', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
-    PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '未知',
+    RUNNING: '运行中', UP: '可用', DOWN: '不可用', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
+    PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '待采样',
     ENABLED: '已启用', DISABLED: '已停用',
   }
   return mapping[status] ?? status
@@ -605,7 +609,7 @@ onMounted(initializeAuth)
           <article v-for="item in filteredProjects" :key="item.id" class="project-card"><div class="project-head"><div class="project-symbol">{{ item.name.slice(0, 1) }}</div><div class="card-actions"><el-tag :type="badge(item.status)" effect="light">{{ statusText(item.status) }}</el-tag><button title="编辑项目" @click="openProjectEdit(item)"><Pencil :size="15" /></button><button title="删除项目" class="danger-action" @click="removeProject(item)"><Trash2 :size="15" /></button></div></div><h3>{{ item.name }}</h3><p>{{ item.description }}</p><div class="project-meta"><span>负责人</span><strong>{{ item.owner }}</strong></div><div class="project-footer"><button @click="openProjectServices(item)"><Server :size="14" />{{ assets.filter(asset => asset.projectName === item.name).length }} 项服务<ChevronRight :size="14" /></button><button @click="openProjectAlerts(item)"><AlertTriangle :size="14" />{{ alerts.filter(alert => alert.projectName === item.name && alert.status === 'OPEN').length }} 个告警<ChevronRight :size="14" /></button></div></article>
         </div>
 
-        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="120" /><el-table-column prop="endpoint" label="连接地址" min-width="190" /><el-table-column label="运行状态" width="120"><template #default="scope"><div class="asset-status"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag><span v-if="scope.row.monitoringStale">数据已陈旧</span></div></template></el-table-column><el-table-column label="监控同步" width="150"><template #default="scope"><el-tooltip :content="scope.row.monitoringError || scope.row.syncMessage || '尚未同步到 HertzBeat'" placement="top"><div class="sync-state"><el-tag :type="scope.row.mappingStatus === 'MANAGED' ? 'success' : scope.row.mappingStatus === 'INVALIDATED' ? 'danger' : 'info'" effect="light">{{ scope.row.mappingStatus === 'MANAGED' ? 'HertzBeat 管理' : scope.row.mappingStatus === 'INVALIDATED' ? '映射失效' : '本地巡检' }}</el-tag><span>{{ scope.row.lastSuccessfulSyncAt ? formatTime(scope.row.lastSuccessfulSyncAt) : '未回写' }}</span></div></el-tooltip></template></el-table-column><el-table-column label="操作" width="170" fixed="right"><template #default="scope"><div class="row-actions"><button title="监控详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button :title="scope.row.syncStatus === 'SYNCED' ? '重新同步到 HertzBeat' : '同步到 HertzBeat'" :disabled="syncingAssetId === scope.row.id" @click="syncAsset(scope.row)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingAssetId === scope.row.id }" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
+        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="120" /><el-table-column prop="endpoint" label="连接地址" min-width="190" /><el-table-column label="运行状态" width="120"><template #default="scope"><div class="asset-status"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag><span v-if="scope.row.monitoringStale">{{ scope.row.lastCollectedAt ? '数据已陈旧' : '暂无采样' }}</span></div></template></el-table-column><el-table-column label="监控同步" width="150"><template #default="scope"><el-tooltip :content="scope.row.monitoringError || scope.row.syncMessage || '尚未同步到 HertzBeat'" placement="top"><div class="sync-state"><el-tag :type="scope.row.mappingStatus === 'MANAGED' ? 'success' : scope.row.mappingStatus === 'INVALIDATED' ? 'danger' : 'info'" effect="light">{{ scope.row.mappingStatus === 'MANAGED' ? 'HertzBeat 管理' : scope.row.mappingStatus === 'INVALIDATED' ? '映射失效' : '本地巡检' }}</el-tag><span>{{ scope.row.lastSuccessfulSyncAt ? formatTime(scope.row.lastSuccessfulSyncAt) : '未回写' }}</span></div></el-tooltip></template></el-table-column><el-table-column label="操作" width="170" fixed="right"><template #default="scope"><div class="row-actions"><button title="监控详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button :title="scope.row.syncStatus === 'SYNCED' ? '重新同步到 HertzBeat' : '同步到 HertzBeat'" :disabled="syncingAssetId === scope.row.id" @click="syncAsset(scope.row)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingAssetId === scope.row.id }" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
 
         <div v-if="activeView === 'inspections'" class="inspection-center">
           <div class="inspection-view-heading"><div class="inspection-heading-title"><button v-if="inspectionSection === 'results' && selectedInspectionPlan" class="records-back" title="返回巡检计划" @click="backToPlans"><ArrowLeft :size="18" /></button><div><h2>{{ inspectionSection === 'plans' ? '巡检计划列表' : selectedInspectionPlan ? `${selectedInspectionPlan.name} · 执行记录` : '执行记录' }}</h2><p v-if="inspectionSection === 'plans'">配置巡检周期并管理自动执行任务</p></div></div></div>

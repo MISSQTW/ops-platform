@@ -71,9 +71,13 @@ const titles = {
 };
 const filteredProjects = computed(() => projects.value.filter(item => includesKeyword(item.name, item.owner, item.description)));
 const activeServiceCategory = computed(() => assetCategories.find(item => item.key === serviceCategory.value) || null);
+const healthyStatuses = new Set(['UP', 'HEALTHY']);
+const abnormalStatuses = new Set(['DOWN', 'CRITICAL', 'FAILED']);
+const isHealthyStatus = (status) => healthyStatuses.has(status);
+const isAbnormalStatus = (status) => abnormalStatuses.has(status);
 const assetCategoryStats = computed(() => assetCategories.map(category => {
     const categoryAssets = assets.value.filter(item => category.types.includes(item.type));
-    const healthy = categoryAssets.filter(item => item.status === 'HEALTHY').length;
+    const healthy = categoryAssets.filter(item => isHealthyStatus(item.status)).length;
     return { ...category, count: categoryAssets.length, healthy, percentage: categoryAssets.length ? (healthy / categoryAssets.length) * 100 : 0 };
 }));
 const currentTitle = computed(() => {
@@ -89,7 +93,7 @@ const currentTitle = computed(() => {
         return { title: '待处理告警', description: '查看尚未恢复的运行告警' };
     return titles[activeView.value];
 });
-const filteredAssets = computed(() => assets.value.filter(item => (!selectedProjectName.value || item.projectName === selectedProjectName.value) && (serviceListMode.value === 'all' || item.status !== 'HEALTHY') && (!activeServiceCategory.value || activeServiceCategory.value.types.includes(item.type)) && includesKeyword(item.name, item.projectName, item.endpoint, item.type)));
+const filteredAssets = computed(() => assets.value.filter(item => (!selectedProjectName.value || item.projectName === selectedProjectName.value) && (serviceListMode.value === 'all' || isAbnormalStatus(item.status)) && (!activeServiceCategory.value || activeServiceCategory.value.types.includes(item.type)) && includesKeyword(item.name, item.projectName, item.endpoint, item.type)));
 const filteredInspections = computed(() => inspections.value.filter(item => includesKeyword(item.name, item.projectName)));
 const selectedPlanInspections = computed(() => filteredInspections.value.filter(item => !selectedInspectionPlan.value || (item.name === selectedInspectionPlan.value.name && item.projectName === selectedInspectionPlan.value.projectName)));
 const pagedPlanInspections = computed(() => selectedPlanInspections.value.slice((inspectionPage.value - 1) * inspectionPageSize, inspectionPage.value * inspectionPageSize));
@@ -199,15 +203,15 @@ function includesKeyword(...values) {
 }
 function badge(status) {
     const mapping = {
-        RUNNING: 'success', HEALTHY: 'success', PASSED: 'success', RESOLVED: 'info',
-        MAINTENANCE: 'warning', WARNING: 'warning', OPEN: 'danger', CRITICAL: 'danger', FAILED: 'danger', INFO: 'info',
+        RUNNING: 'success', UP: 'success', HEALTHY: 'success', PASSED: 'success', RESOLVED: 'info',
+        MAINTENANCE: 'warning', WARNING: 'warning', OPEN: 'danger', DOWN: 'danger', CRITICAL: 'danger', FAILED: 'danger', INFO: 'info',
     };
     return mapping[status] ?? 'info';
 }
 function statusText(status) {
     const mapping = {
-        RUNNING: '运行中', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
-        PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '未知',
+        RUNNING: '运行中', UP: '可用', DOWN: '不可用', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
+        PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '待采样',
         ENABLED: '已启用', DISABLED: '已停用',
     };
     return mapping[status] ?? status;
@@ -1621,6 +1625,7 @@ function __VLS_template() {
                     var __VLS_317;
                     if (scope.row.monitoringStale) {
                         __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                        (scope.row.lastCollectedAt ? '数据已陈旧' : '暂无采样');
                     }
                 }
                 var __VLS_311;

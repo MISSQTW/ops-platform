@@ -3,7 +3,7 @@ epic: ../epics/hertzbeat-observability-loop.md
 phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
 current_item: null
-next_action: 等待 owner 最终接受；接受后补齐永久 Epic 交付索引并清理 work 游标
+next_action: 复审 owner 验收驳回后的状态语义修复，再次进入 owner 最终接受 gate
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -40,3 +40,8 @@ remote_publish: manual
 - 同步协调器现重试到期清理任务，并将全部仍为 `PENDING` 的清理失败写入本次运行错误摘要，直到清理成功。
 - 修复后后端全量 45 个测试通过，前端生产构建通过；最新 Docker 在线运行 `id=64` 为 `SUCCESS`，指标详情返回 `metricsStale=false`、59 个趋势点。
 - final acceptance reviewer 对完整范围 `bcf966f..7e3b558` 复审通过：无 blocking、important、nit；前轮 1 个 blocking 和 3 个 important 均 resolved，可进入 owner 最终接受 gate。
+- Owner 验收未通过：`UP` 被旧逻辑当作异常，`UNKNOWN + 数据已陈旧` 文案无法说明无采样与明确故障的区别。
+- 根因是仪表盘和前端异常筛选仍沿用 `status != HEALTHY`，与 HertzBeat 的 `UP/DOWN/UNKNOWN` 状态模型不一致；因此 1 个 `UP` 和 2 个 `UNKNOWN` 被全部计为异常。
+- 修复后统一语义：`UP/HEALTHY` 为可用，只有 `DOWN/CRITICAL/FAILED` 为明确异常，`UNKNOWN` 为待采样；无采集时间时显示“暂无采样”，已有旧采样时才显示“数据已陈旧”。
+- 新增异常状态语义回归测试；后端全量 46 个测试通过，前端生产构建通过；Docker 在线汇总由异常服务 `3` 修正为 `0`。
+- 当前两个 HTTP 资产 `host.docker.internal:7788/4173` 的 HertzBeat 原始指标响应为 `query metrics data is empty`，所以保持 `UNKNOWN/待采样`；PostgreSQL 有近期采样，保持 `UP/可用`。

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.transaction.annotation.Transactional;
 public interface AssetRepository extends JpaRepository<Asset, Long> {
   long countByStatusNot(String status);
+  long countByStatusIn(List<String> statuses);
   List<Asset> findByProjectNameOrderById(String projectName);
   List<Asset> findByMonitoringMode(String monitoringMode);
 

@@ -1,6 +1,7 @@
 package com.lqbz.ops.web;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import com.lqbz.ops.domain.*;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,7 +30,7 @@ public class DashboardController {
     Map<String, Object> summary = new LinkedHashMap<>();
     summary.put("projectCount", projects.count());
     summary.put("assetCount", assets.count());
-    summary.put("abnormalAssetCount", assets.countByStatusNot("HEALTHY"));
+    summary.put("abnormalAssetCount", assets.countByStatusIn(List.of("DOWN", "CRITICAL", "FAILED")));
     summary.put("openAlertCount", alerts.countByStatus("OPEN"));
     summary.put("inspectionPassRate", total == 0 ? 100 : Math.round(passed * 100.0 / total));
     return summary;
