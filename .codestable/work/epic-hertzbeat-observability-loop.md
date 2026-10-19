@@ -3,7 +3,7 @@ epic: ../epics/hertzbeat-observability-loop.md
 phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
 current_item: null
-next_action: 创建 fresh acceptance reviewer，对最新里程碑逐项执行 Epic 最终验收
+next_action: 等待 owner 最终接受；接受后补齐永久 Epic 交付索引并清理 work 游标
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -39,3 +39,4 @@ remote_publish: manual
 - 监控详情现独立返回 `metricsCached`、`metricsCollectedAt`、`metricsStale`；前端按指标采集时间展示 180 秒陈旧提示。
 - 同步协调器现重试到期清理任务，并将全部仍为 `PENDING` 的清理失败写入本次运行错误摘要，直到清理成功。
 - 修复后后端全量 45 个测试通过，前端生产构建通过；最新 Docker 在线运行 `id=64` 为 `SUCCESS`，指标详情返回 `metricsStale=false`、59 个趋势点。
+- final acceptance reviewer 对完整范围 `bcf966f..7e3b558` 复审通过：无 blocking、important、nit；前轮 1 个 blocking 和 3 个 important 均 resolved，可进入 owner 最终接受 gate。
