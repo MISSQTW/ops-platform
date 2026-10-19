@@ -58,11 +58,16 @@ public class MonitoringProjectionService {
     int updated = 0;
     for (HertzBeatClient.ExternalAlert external : externalAlerts) {
       Asset asset = managedAssets.stream()
-          .filter(candidate -> external.monitorId() == candidate.getHertzbeatMonitorId())
+          .filter(candidate -> candidate.getHertzbeatMonitorId() != null)
+          .filter(candidate -> external.assetId() == null
+              || java.util.Objects.equals(external.assetId(), candidate.getId()))
+          .filter(candidate -> external.monitorId() > 0
+              ? java.util.Objects.equals(external.monitorId(), candidate.getHertzbeatMonitorId())
+              : external.assetId() != null && java.util.Objects.equals(external.assetId(), candidate.getId()))
           .findFirst().orElse(null);
       if (asset == null) continue;
       Alert alert = alerts.findByExternalSourceAndExternalAlertId("HERTZBEAT", external.externalId())
-          .orElseGet(() -> Alert.external("HERTZBEAT", external.externalId(), external.monitorId(),
+          .orElseGet(() -> Alert.external("HERTZBEAT", external.externalId(), asset.getHertzbeatMonitorId(),
               normalizeLevel(external.level()), asset.getProjectName(), asset.getName(), external.message(),
               external.occurredAt() == null ? LocalDateTime.now() : external.occurredAt()));
       if (resolved) alert.resolve(external.resolvedAt() == null ? LocalDateTime.now() : external.resolvedAt());

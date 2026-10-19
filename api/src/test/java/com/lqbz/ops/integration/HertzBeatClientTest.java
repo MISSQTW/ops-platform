@@ -69,6 +69,19 @@ class HertzBeatClientTest {
   }
 
   @Test
+  void 应解析真实SingleAlert的受管资产标签级别和恢复时间() throws Exception {
+    server.createContext("/api/alerts", exchange -> respond(exchange, 200,
+        "{\"code\":0,\"data\":{\"content\":[{\"id\":42,\"labels\":{\"assetId\":\"77\",\"severity\":\"critical\"},\"content\":\"验收告警\",\"startAt\":1792381200000,\"endAt\":1792384800000}],\"last\":true}}"));
+
+    List<HertzBeatClient.ExternalAlert> result = client.alerts("resolved");
+
+    assertThat(result).hasSize(1);
+    assertThat(result.getFirst().assetId()).isEqualTo(77L);
+    assertThat(result.getFirst().level()).isEqualTo("critical");
+    assertThat(result.getFirst().resolvedAt()).isNotNull();
+  }
+
+  @Test
   void Redis资产应同步为端口监控() throws Exception {
     Asset asset = new Asset("订单缓存", "订单平台", "生产", "REDIS", "redis://cache.internal:6380", "UNKNOWN");
 

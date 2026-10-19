@@ -133,11 +133,16 @@ public class HertzBeatClient {
       for (JsonNode item : content) {
         String externalId = text(first(item, "id", "alertId"));
         long monitorId = number(first(item, "monitorId", "targetId", "monitor"));
-        if (externalId.isBlank() || monitorId <= 0) continue;
+        JsonNode labels = item.path("labels");
+        if (monitorId <= 0) monitorId = number(first(labels, "monitorId", "monitor_id"));
+        long assetId = number(labels.path("assetId"));
+        if (externalId.isBlank() || monitorId <= 0 && assetId <= 0) continue;
         LocalDateTime startedAt = parseTime(first(item, "firstTriggerTime", "startAt", "occurredAt", "lastTriggerTime"));
-        LocalDateTime resolvedAt = parseTime(first(item, "endTime", "resolvedAt", "lastRecoverTime"));
-        results.add(new ExternalAlert(externalId, monitorId, text(first(item, "priority", "level", "severity")),
-            text(first(item, "content", "message", "name")), startedAt, resolvedAt));
+        LocalDateTime resolvedAt = parseTime(first(item, "endAt", "endTime", "resolvedAt", "lastRecoverTime"));
+        String level = text(first(item, "priority", "level", "severity"));
+        if (level.isBlank()) level = text(first(labels, "severity", "priority", "level"));
+        results.add(new ExternalAlert(externalId, monitorId, level,
+            text(first(item, "content", "message", "name")), startedAt, resolvedAt, assetId > 0 ? assetId : null));
       }
       boolean last = data.path("last").asBoolean(false);
       int totalPages = data.path("totalPages").asInt(-1);
@@ -359,7 +364,12 @@ public class HertzBeatClient {
   public record SyncResult(long monitorId, String message) {}
   public record MonitorStatus(String status, LocalDateTime collectedAt, boolean disabled) {}
   public record ExternalAlert(String externalId, long monitorId, String level, String message,
-                              LocalDateTime occurredAt, LocalDateTime resolvedAt) {}
+                              LocalDateTime occurredAt, LocalDateTime resolvedAt, Long assetId) {
+    public ExternalAlert(String externalId, long monitorId, String level, String message,
+                         LocalDateTime occurredAt, LocalDateTime resolvedAt) {
+      this(externalId, monitorId, level, message, occurredAt, resolvedAt, null);
+    }
+  }
   public record MetricResult(List<MonitoringMetric> latest, List<MonitoringMetric> history,
                              LocalDateTime collectedAt, List<String> errors) {}
   public record MetricTarget(String app, String instance) {}

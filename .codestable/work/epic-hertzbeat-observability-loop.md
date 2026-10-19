@@ -3,8 +3,8 @@ epic: ../epics/hertzbeat-observability-loop.md
 phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
 current_item: null
-next_action: 磁盘空间稳定充足、OrbStack 恢复后先删除临时资产 id=37 及外部监控 696014098024960，再补验故障→恢复与真实告警；禁止继续积累测试资产
-blocked_by: OrbStack 恢复后再次退出为 Stopped，磁盘可用空间由约 5 GB 降至 1.1 GB；平台端口拒绝连接
+next_action: 对本轮真实告警字段适配变更做独立审查，保留 owner 未接受状态
+blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
 remote_publish: manual
@@ -57,3 +57,9 @@ remote_publish: manual
 - 后续环境恢复尝试：启动 OrbStack 和项目服务成功，通过 API 删除遗留临时资产 5（HTTP 204）。镜像源 TLS 超时后将本地 dist 复制至 Web 容器，并保存为本地镜像 ops-platform-web:latest（40aeb252585e）。最新 UI 当时已部署。
 - 新一轮临时资产 37 / monitorId=696014098024960 已通过真实正常阶段：UP、metricsStale=false、采样时间 2026-10-19T17:29:28.226。切换 web:9 后，OrbStack 再次停止，测试和自动清理因连接拒绝中断；不能声明故障/恢复链路通过。
 - HertzBeat 当前 firing/resolved API 均返回空列表，所以尚无真实告警触发及恢复证据，不能用状态正常阶段通过替代告警闭环验收。
+- 环境已于后续恢复：磁盘约 57 GB 可用，OrbStack 和全部项目容器恢复；遗留临时资产 37 已通过 API 删除（204）。
+- 真实 HTTP 状态端到端验收通过：临时资产 70 / monitorId=696086274123520，web:80 成功采样为 UP（22:22:58.739）→web:9 为 DOWN→恢复 web:80 后 UP 且有新采样（22:23:56.741），metricsStale=false。结束后已删除临时资产及其外部监控。
+- 本机告警实体为 SingleAlert，监控关联通过 labels 中的受管 assetId（及兼容 monitorId），级别在 labels.severity，恢复时间为 endAt；旧适配器忽略这些字段会漏同步，现已修复，并拒绝监控 ID 与资产标签冲突的事件。
+- 修复后后端全量 50 项测试及打包通过，包含实际 SingleAlert 标签/恢复时间和冲突关联隔离用例；API 镜像已重建部署。
+- 真实 HertzBeat 接入接口→HertzBeat 列表→平台数据库告警链路通过：临时资产 71，外部 alertId=1 对应平台事件 id=1；两次 firing 同步保持单条，resolved 同步更新原事件并保留 handlingStatus=OPEN，恢复时间 22:25:11.975。此测试通过 HertzBeat 标准 report 接口注入事件，不是阈值引擎自动触发测试。
+- 清理完成：资产 71 及外部监控已删除；HertzBeat 仅含该测试的告警组已删除，平台仅本轮测试告警已按 ID、来源、项目和名称精确清理。三个业务资产未改动；api/postgres/redis 健康，web/hertzbeat/victoriametrics 正常运行。

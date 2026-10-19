@@ -84,4 +84,25 @@ class MonitoringProjectionServiceTest {
   private Asset asset() {
     return new Asset("订单接口", "订单平台", "生产", "HTTP", "https://example.com/health", "UNKNOWN");
   }
+
+  @Test
+  void 受管资产标签应关联真实告警且拒绝冲突监控ID() throws Exception {
+    Asset asset = asset();
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    asset.markSynced(321L, "同步成功");
+    when(assets.findByMonitoringMode("HERTZBEAT")).thenReturn(List.of(asset));
+    when(client.monitorStatus(321L)).thenReturn(new HertzBeatClient.MonitorStatus("UP", LocalDateTime.now(), false));
+    when(client.alerts("firing")).thenReturn(List.of(
+        new HertzBeatClient.ExternalAlert("native-1", 0, "critical", "标签关联告警", LocalDateTime.now(), null, 77L),
+        new HertzBeatClient.ExternalAlert("conflict", 999, "critical", "冲突标签告警", LocalDateTime.now(), null, 77L)));
+    when(client.alerts("resolved")).thenReturn(List.of());
+
+    MonitoringProjectionService.ProjectionResult result = service.sync(LocalDateTime.now());
+
+    assertThat(result.alertsUpdated()).isEqualTo(1);
+    org.mockito.ArgumentCaptor<com.lqbz.ops.domain.Alert> saved = org.mockito.ArgumentCaptor.forClass(com.lqbz.ops.domain.Alert.class);
+    org.mockito.Mockito.verify(alerts).save(saved.capture());
+    assertThat(saved.getValue().getExternalMonitorId()).isEqualTo(321L);
+    assertThat(saved.getValue().getExternalAlertId()).isEqualTo("native-1");
+  }
 }
