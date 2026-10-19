@@ -34,3 +34,8 @@ remote_publish: manual
 - 在线验收：3 个资产均为 `HERTZBEAT + MANAGED`；PostgreSQL 为 `UP` 且指标新鲜，两个当前无新样本的 HTTP 资产为 `UNKNOWN + stale`，未误判为 `DOWN`。
 - 在线验收：PostgreSQL 详情返回 availability、responseTime（`ms`）和最近一小时 59 个趋势点；管理员会话返回 `canManageIntegrations=true`。
 - HertzBeat 停机降级、最后有效指标缓存、重复同步、重启补偿、监控删除幂等和外部清理重试已在前序实现验证及自动化测试中覆盖。
+- 首轮 final acceptance review 对提交 `6d02cf9` 给出 1 个 blocking、3 个 important：外部监控 404 未失效映射、最新指标缺少单项错误隔离、指标级 stale 未输出、清理失败未进入同步运行记录。
+- 验收修复已增加可识别的 `MonitorNotFoundException` 并将资产置为 `INVALIDATED + UNKNOWN`；当前指标逐项解析并保留其他有效值，同时返回解析错误摘要。
+- 监控详情现独立返回 `metricsCached`、`metricsCollectedAt`、`metricsStale`；前端按指标采集时间展示 180 秒陈旧提示。
+- 同步协调器现重试到期清理任务，并将全部仍为 `PENDING` 的清理失败写入本次运行错误摘要，直到清理成功。
+- 修复后后端全量 45 个测试通过，前端生产构建通过；最新 Docker 在线运行 `id=64` 为 `SUCCESS`，指标详情返回 `metricsStale=false`、59 个趋势点。

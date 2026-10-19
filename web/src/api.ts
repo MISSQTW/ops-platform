@@ -37,7 +37,7 @@ export type IntegrationStatus = { connected: boolean; endpoint: string; duration
 export type AssetSyncAllResult = { total: number; succeeded: number; failed: number; assets: Asset[] }
 export type SessionUser = { username: string; displayName: string; canManageIntegrations: boolean }
 export type MonitoringMetric = { name: string; value: number | null; booleanValue: boolean | null; unit: string | null; collectedAt: string | null }
-export type MonitoringDetails = { asset: Asset; latestMetrics: MonitoringMetric[]; history: MonitoringMetric[]; metricsMessage: string | null }
+export type MonitoringDetails = { asset: Asset; latestMetrics: MonitoringMetric[]; history: MonitoringMetric[]; metricsMessage: string | null; metricsCached: boolean; metricsCollectedAt: string | null; metricsStale: boolean }
 export type MonitoringSyncRun = { id: number; triggerType: string; status: string; startedAt: string; finishedAt: string | null; assetsUpdated: number; alertsUpdated: number; errorSummary: string | null }
 
 let authToken = localStorage.getItem('ops_token') || ''

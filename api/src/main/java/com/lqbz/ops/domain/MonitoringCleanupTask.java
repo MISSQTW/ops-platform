@@ -31,5 +31,7 @@ public class MonitoringCleanupTask {
   public void failed(String error) { attempts++; lastError = error; nextAttemptAt = LocalDateTime.now().plusMinutes(Math.min(30, attempts)); }
   public void complete() { status = "COMPLETED"; lastError = null; }
   public Long getMonitorId() { return monitorId; }
+  public String getAssetName() { return assetName; }
   public String getStatus() { return status; }
+  public String getLastError() { return lastError; }
 }

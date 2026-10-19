@@ -38,7 +38,7 @@ class HertzBeatClientTest {
       respond(exchange, 200, "{\"code\":0,\"data\":null}");
     });
     server.createContext("/api/monitor/321/metrics/summary", exchange -> respond(exchange, 200,
-        "{\"code\":0,\"data\":{\"time\":1792384800000,\"fields\":[{\"name\":\"responseTime\",\"unit\":\"ms\"}],\"valueRows\":[{\"values\":[{\"origin\":\"86\",\"time\":1792384800000}]}]}}"));
+        "{\"code\":0,\"data\":{\"time\":1792384800000,\"fields\":[{\"name\":\"responseTime\",\"unit\":\"fortnight\"},{\"name\":\"responseTime\",\"unit\":\"ms\"}],\"valueRows\":[{\"values\":[{\"origin\":\"invalid\",\"time\":1792384800000},{\"origin\":\"86\",\"time\":1792384800000}]}]}}"));
     server.createContext("/api/monitor/order.example.com:443/metric/website.summary.responseTime", exchange -> respond(exchange, 200,
         "{\"code\":0,\"data\":{\"field\":{\"name\":\"responseTime\",\"unit\":\"ms\"},\"values\":{\"default\":[{\"origin\":\"82\",\"time\":1792381200000},{\"origin\":\"86\",\"time\":1792384800000}]}}}"));
     server.createContext("/api/monitor/999", exchange -> respond(exchange, 404, ""));
@@ -107,6 +107,12 @@ class HertzBeatClientTest {
   @Test
   void 删除不存在的监控应视为幂等成功() throws Exception {
     client.deleteMonitor(999L);
+  }
+
+  @Test
+  void 查询不存在的监控应返回可识别的映射失效异常() {
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.monitorStatus(999L)))
+        .isInstanceOf(HertzBeatClient.MonitorNotFoundException.class);
   }
 
   private CapturedRequest capture(HttpExchange exchange) throws IOException {

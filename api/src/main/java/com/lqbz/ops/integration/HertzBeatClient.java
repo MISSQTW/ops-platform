@@ -143,6 +143,7 @@ public class HertzBeatClient {
     JsonNode current = getJson(token, "/api/monitor/" + monitorId + "/metrics/summary").path("data");
     LocalDateTime collectedAt = parseTime(current.path("time"));
     List<MonitoringMetric> latest = new ArrayList<>();
+    List<String> errors = new ArrayList<>();
     if (!current.path("valueRows").isEmpty()) latest.add(MonitoringMetric.availability(true, collectedAt));
     JsonNode fields = current.path("fields");
     JsonNode values = current.path("valueRows").isArray() && !current.path("valueRows").isEmpty()
@@ -150,9 +151,13 @@ public class HertzBeatClient {
     for (int index = 0; index < Math.min(fields.size(), values.size()); index++) {
       JsonNode field = fields.get(index);
       if (!"responseTime".equals(field.path("name").asText())) continue;
-      double value = Double.parseDouble(values.get(index).path("origin").asText("0"));
-      latest.add(MonitoringMetric.duration("responseTime", value, field.path("unit").asText("ms"),
-          parseTime(values.get(index).path("time"))));
+      try {
+        double value = Double.parseDouble(values.get(index).path("origin").asText("0"));
+        latest.add(MonitoringMetric.duration("responseTime", value, field.path("unit").asText("ms"),
+            parseTime(values.get(index).path("time"))));
+      } catch (IllegalArgumentException exception) {
+        errors.add("responseTime 解析失败：" + exception.getMessage());
+      }
     }
     String metricFull = app + ".summary.responseTime";
     String historyPath = "/api/monitor/" + instance + "/metric/" + metricFull + "?history=1h&interval=true";
@@ -170,7 +175,7 @@ public class HertzBeatClient {
         }
       }));
     }
-    return new MetricResult(latest, history, collectedAt);
+    return new MetricResult(latest, history, collectedAt, errors);
   }
 
   public MetricTarget metricTarget(Asset asset) {
@@ -184,7 +189,7 @@ public class HertzBeatClient {
         .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + token).DELETE().build();
     HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     if (response.statusCode() == 404) return;
-    JsonNode json = objectMapper.readTree(response.body());
+    JsonNode json = response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
     if (json.path("msg").asText("").toLowerCase().contains("not exist")) return;
     if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
       throw new IllegalStateException("HertzBeat 删除监控失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
@@ -197,7 +202,10 @@ public class HertzBeatClient {
         .header("Authorization", "Bearer " + token)
         .GET().build();
     HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    JsonNode json = objectMapper.readTree(response.body());
+    JsonNode json = response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
+    if (response.statusCode() == 404 || json.path("msg").asText("").toLowerCase().contains("not exist")) {
+      throw new MonitorNotFoundException(path);
+    }
     if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
       throw new IllegalStateException("HertzBeat 查询失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
     }
@@ -345,7 +353,12 @@ public class HertzBeatClient {
   public record ExternalAlert(String externalId, long monitorId, String level, String message,
                               LocalDateTime occurredAt, LocalDateTime resolvedAt) {}
   public record MetricResult(List<MonitoringMetric> latest, List<MonitoringMetric> history,
-                             LocalDateTime collectedAt) {}
+                             LocalDateTime collectedAt, List<String> errors) {}
   public record MetricTarget(String app, String instance) {}
   private record MonitorTarget(String app, String instance, List<Map<String, Object>> params) {}
+
+  public static class MonitorNotFoundException extends IllegalStateException {
+    public MonitorNotFoundException(long monitorId) { super("HertzBeat 监控不存在：" + monitorId); }
+    private MonitorNotFoundException(String path) { super("HertzBeat 监控不存在：" + path); }
+  }
 }

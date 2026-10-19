@@ -4,6 +4,7 @@ import com.lqbz.ops.domain.Asset;
 import com.lqbz.ops.domain.MonitoringCleanupTask;
 import com.lqbz.ops.domain.MonitoringCleanupTaskRepository;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,10 +32,18 @@ public class MonitoringCleanupService {
   @Scheduled(fixedDelayString = "${ops.hertzbeat.cleanup-interval-ms:60000}")
   @Transactional
   public void retryPending() {
-    for (MonitoringCleanupTask task : tasks.findByStatusAndNextAttemptAtBefore("PENDING", LocalDateTime.now())) {
+    retryAndListPending(LocalDateTime.now());
+  }
+
+  @Transactional
+  public List<String> retryAndListPending(LocalDateTime now) {
+    for (MonitoringCleanupTask task : tasks.findByStatusAndNextAttemptAtBefore("PENDING", now)) {
       try { client.deleteMonitor(task.getMonitorId()); task.complete(); }
       catch (Exception exception) { task.failed(message(exception)); }
     }
+    return tasks.findByStatus("PENDING").stream()
+        .map(task -> "监控 " + task.getMonitorId() + "（" + task.getAssetName() + "）清理失败：" + task.getLastError())
+        .toList();
   }
 
   private String message(Exception exception) {

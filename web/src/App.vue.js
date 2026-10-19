@@ -3317,18 +3317,18 @@ function __VLS_template() {
             __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
             __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.monitoringDetails.asset.lastCollectedAt ? __VLS_ctx.formatTime(__VLS_ctx.monitoringDetails.asset.lastCollectedAt) : '--');
-            if (__VLS_ctx.monitoringDetails.asset.monitoringStale) {
+            if (__VLS_ctx.monitoringDetails.metricsStale) {
                 const __VLS_916 = {}.ElAlert;
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_917 = __VLS_asFunctionalComponent(__VLS_916, new __VLS_916({
-                    title: ("当前展示的是最后一次有效数据，数据已陈旧"),
+                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
                     type: ("warning"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
                 const __VLS_918 = __VLS_917({
-                    title: ("当前展示的是最后一次有效数据，数据已陈旧"),
+                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
                     type: ("warning"),
                     closable: ((false)),
                     showIcon: (true),

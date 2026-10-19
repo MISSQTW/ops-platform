@@ -34,6 +34,9 @@ public class MonitoringProjectionService {
         if (external.disabled()) asset.applyMonitoringStatus("UNKNOWN", external.collectedAt(), now);
         else asset.applyMonitoringStatus(external.status(), external.collectedAt(), now);
         assetsUpdated++;
+      } catch (HertzBeatClient.MonitorNotFoundException exception) {
+        asset.invalidateMonitoring(message(exception));
+        errors.add(asset.getName() + "：" + message(exception));
       } catch (Exception exception) {
         String message = message(exception);
         asset.markMonitoringSyncFailed(now, message);

@@ -48,6 +48,21 @@ class MonitoringProjectionServiceTest {
   }
 
   @Test
+  void 外部监控不存在时应将映射标记为失效() throws Exception {
+    Asset asset = asset();
+    asset.markSynced(321L, "同步成功");
+    when(assets.findByMonitoringMode("HERTZBEAT")).thenReturn(List.of(asset));
+    when(client.monitorStatus(321L)).thenThrow(new HertzBeatClient.MonitorNotFoundException(321L));
+    when(client.alerts("firing")).thenReturn(List.of());
+    when(client.alerts("resolved")).thenReturn(List.of());
+
+    service.sync(LocalDateTime.now());
+
+    assertThat(asset.getMappingStatus()).isEqualTo("INVALIDATED");
+    assertThat(asset.getStatus()).isEqualTo("UNKNOWN");
+  }
+
+  @Test
   void 明确resolved数据应更新原告警而不是创建重复记录() throws Exception {
     Asset asset = asset();
     asset.markSynced(321L, "同步成功");

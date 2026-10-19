@@ -33,12 +33,16 @@ public class MonitoringMetricsService {
           .orElseGet(() -> new MonitoringMetricSnapshot(asset.getId()));
       snapshot.update(write(metrics.latest()), write(metrics.history()), metrics.collectedAt(), LocalDateTime.now());
       snapshots.save(snapshot);
-      return new Result(metrics.latest(), metrics.history(), null, false);
+      String message = metrics.errors().isEmpty() ? null : String.join("；", metrics.errors());
+      return new Result(metrics.latest(), metrics.history(), message, false, metrics.collectedAt(),
+          isStale(metrics.collectedAt()));
     } catch (Exception exception) {
       MonitoringMetricSnapshot snapshot = snapshots.findByAssetId(asset.getId()).orElse(null);
       String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-      if (snapshot == null) return new Result(List.of(), List.of(), message, false);
-      return new Result(read(snapshot.getLatestJson()), read(snapshot.getHistoryJson()), "HertzBeat 暂不可用，展示最后有效指标：" + message, true);
+      if (snapshot == null) return new Result(List.of(), List.of(), message, false, null, true);
+      return new Result(read(snapshot.getLatestJson()), read(snapshot.getHistoryJson()),
+          "HertzBeat 暂不可用，展示最后有效指标：" + message, true, snapshot.getCollectedAt(),
+          isStale(snapshot.getCollectedAt()));
     }
   }
 
@@ -48,5 +52,10 @@ public class MonitoringMetricsService {
     catch (Exception ignored) { return List.of(); }
   }
 
-  public record Result(List<MonitoringMetric> latest, List<MonitoringMetric> history, String message, boolean cached) {}
+  private boolean isStale(LocalDateTime collectedAt) {
+    return collectedAt == null || collectedAt.plusSeconds(180).isBefore(LocalDateTime.now());
+  }
+
+  public record Result(List<MonitoringMetric> latest, List<MonitoringMetric> history, String message, boolean cached,
+                       LocalDateTime collectedAt, boolean stale) {}
 }

@@ -51,11 +51,15 @@ public class MonitoringIntegrationController {
   @GetMapping("/hertzbeat/assets/{id}/details")
   public MonitoringDetails monitoringDetails(@PathVariable Long id) throws Exception {
     Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("资产不存在"));
-    if (asset.getHertzbeatMonitorId() == null) return new MonitoringDetails(asset, List.of(), List.of(), "尚未绑定 HertzBeat 监控");
+    if (asset.getHertzbeatMonitorId() == null) {
+      return new MonitoringDetails(asset, List.of(), List.of(), "尚未绑定 HertzBeat 监控", false, null, true);
+    }
     MonitoringMetricsService.Result metrics = metricsService.load(asset);
-    return new MonitoringDetails(asset, metrics.latest(), metrics.history(), metrics.message());
+    return new MonitoringDetails(asset, metrics.latest(), metrics.history(), metrics.message(), metrics.cached(),
+        metrics.collectedAt(), metrics.stale());
   }
 
   public record MonitoringDetails(Asset asset, List<MonitoringMetric> latestMetrics,
-                                  List<MonitoringMetric> history, String metricsMessage) {}
+                                  List<MonitoringMetric> history, String metricsMessage, boolean metricsCached,
+                                  java.time.LocalDateTime metricsCollectedAt, boolean metricsStale) {}
 }

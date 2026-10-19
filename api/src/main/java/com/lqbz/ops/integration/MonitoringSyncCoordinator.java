@@ -17,13 +17,15 @@ public class MonitoringSyncCoordinator {
   private final MonitoringProjectionService projection;
   private final MonitoringSyncLeaseRepository leases;
   private final MonitoringRunRecorder recorder;
+  private final MonitoringCleanupService cleanup;
   private final TransactionTemplate transactionTemplate;
 
   public MonitoringSyncCoordinator(MonitoringProjectionService projection, MonitoringSyncLeaseRepository leases,
-      MonitoringRunRecorder recorder, PlatformTransactionManager transactionManager) {
+      MonitoringRunRecorder recorder, MonitoringCleanupService cleanup, PlatformTransactionManager transactionManager) {
     this.projection = projection;
     this.leases = leases;
     this.recorder = recorder;
+    this.cleanup = cleanup;
     this.transactionTemplate = new TransactionTemplate(transactionManager);
   }
 
@@ -43,7 +45,9 @@ public class MonitoringSyncCoordinator {
     ensureLease();
     leases.findLockedById(LEASE_KEY).orElseThrow();
     MonitoringProjectionService.ProjectionResult result = projection.sync(startedAt);
-    return new MonitoringRunOutcome(result.assetsUpdated(), result.alertsUpdated(), result.errors());
+    java.util.List<String> errors = new java.util.ArrayList<>(result.errors());
+    errors.addAll(cleanup.retryAndListPending(startedAt));
+    return new MonitoringRunOutcome(result.assetsUpdated(), result.alertsUpdated(), errors);
   }
 
   @PostConstruct
