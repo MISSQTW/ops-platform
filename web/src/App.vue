@@ -676,7 +676,8 @@ onMounted(initializeAuth)
       <div class="monitoring-detail" v-loading="monitoringDetailLoading">
         <template v-if="monitoringDetails">
           <div class="monitoring-summary"><div><span>运行状态</span><strong>{{ statusText(monitoringDetails.asset.status) }}</strong></div><div><span>监控 ID</span><strong>{{ monitoringDetails.asset.hertzbeatMonitorId || '--' }}</strong></div><div><span>最近采集</span><strong>{{ monitoringDetails.asset.lastCollectedAt ? formatTime(monitoringDetails.asset.lastCollectedAt) : '--' }}</strong></div></div>
-          <el-alert v-if="monitoringDetails.metricsStale" title="当前指标超过 180 秒未更新，数据已陈旧" type="warning" :closable="false" show-icon />
+          <el-alert v-if="!monitoringDetails.metricsCollectedAt" title="HertzBeat 暂无指标采样，当前状态为待采样" type="info" :closable="false" show-icon />
+          <el-alert v-else-if="monitoringDetails.metricsStale" title="当前指标超过 180 秒未更新，数据已陈旧" type="warning" :closable="false" show-icon />
           <el-alert v-if="monitoringDetails.metricsMessage" :title="monitoringDetails.metricsMessage" type="info" :closable="false" show-icon />
           <div class="monitoring-metrics"><article v-for="metric in monitoringDetails.latestMetrics" :key="metric.name"><span>{{ metricLabel(metric.name) }}</span><strong>{{ metricValue(metric) }}</strong><small>{{ metric.collectedAt ? formatTime(metric.collectedAt) : '暂无采集时间' }}</small></article></div>
           <div class="trend-section"><h3>最近一小时响应时间</h3><div v-if="monitoringDetails.history.length" class="trend-bars"><i v-for="(point, index) in monitoringDetails.history" :key="index" :style="{ height: `${Math.max(8, Math.min(100, Number(point.value || 0) / 3))}%` }" :title="metricValue(point)" /></div><div v-else class="empty-trend">暂无趋势数据</div></div>

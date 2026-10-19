@@ -45,3 +45,5 @@ remote_publish: manual
 - 修复后统一语义：`UP/HEALTHY` 为可用，只有 `DOWN/CRITICAL/FAILED` 为明确异常，`UNKNOWN` 为待采样；无采集时间时显示“暂无采样”，已有旧采样时才显示“数据已陈旧”。
 - 新增异常状态语义回归测试；后端全量 46 个测试通过，前端生产构建通过；Docker 在线汇总由异常服务 `3` 修正为 `0`。
 - 当前两个 HTTP 资产 `host.docker.internal:7788/4173` 的 HertzBeat 原始指标响应为 `query metrics data is empty`，所以保持 `UNKNOWN/待采样`；PostgreSQL 有近期采样，保持 `UP/可用`。
+- 状态语义复审指出详情抽屉仍把从未采样描述为“超过 180 秒未更新”；现已按 `metricsCollectedAt` 分支，无采样显示“暂无指标采样，当前状态为待采样”，有旧采样且超时才显示“数据已陈旧”。
+- 详情文案修复后前端生产构建和 Docker Web 重建通过。

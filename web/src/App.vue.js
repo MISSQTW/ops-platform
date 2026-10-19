@@ -3322,39 +3322,56 @@ function __VLS_template() {
             __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
             __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
             (__VLS_ctx.monitoringDetails.asset.lastCollectedAt ? __VLS_ctx.formatTime(__VLS_ctx.monitoringDetails.asset.lastCollectedAt) : '--');
-            if (__VLS_ctx.monitoringDetails.metricsStale) {
+            if (!__VLS_ctx.monitoringDetails.metricsCollectedAt) {
                 const __VLS_916 = {}.ElAlert;
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_917 = __VLS_asFunctionalComponent(__VLS_916, new __VLS_916({
-                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
-                    type: ("warning"),
+                    title: ("HertzBeat 暂无指标采样，当前状态为待采样"),
+                    type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
                 const __VLS_918 = __VLS_917({
-                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
-                    type: ("warning"),
+                    title: ("HertzBeat 暂无指标采样，当前状态为待采样"),
+                    type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_917));
             }
-            if (__VLS_ctx.monitoringDetails.metricsMessage) {
+            else if (__VLS_ctx.monitoringDetails.metricsStale) {
                 const __VLS_922 = {}.ElAlert;
                 /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
                 // @ts-ignore
                 const __VLS_923 = __VLS_asFunctionalComponent(__VLS_922, new __VLS_922({
+                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
+                    type: ("warning"),
+                    closable: ((false)),
+                    showIcon: (true),
+                }));
+                const __VLS_924 = __VLS_923({
+                    title: ("当前指标超过 180 秒未更新，数据已陈旧"),
+                    type: ("warning"),
+                    closable: ((false)),
+                    showIcon: (true),
+                }, ...__VLS_functionalComponentArgsRest(__VLS_923));
+            }
+            if (__VLS_ctx.monitoringDetails.metricsMessage) {
+                const __VLS_928 = {}.ElAlert;
+                /** @type { [typeof __VLS_components.ElAlert, typeof __VLS_components.elAlert, ] } */ ;
+                // @ts-ignore
+                const __VLS_929 = __VLS_asFunctionalComponent(__VLS_928, new __VLS_928({
                     title: ((__VLS_ctx.monitoringDetails.metricsMessage)),
                     type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
                 }));
-                const __VLS_924 = __VLS_923({
+                const __VLS_930 = __VLS_929({
                     title: ((__VLS_ctx.monitoringDetails.metricsMessage)),
                     type: ("info"),
                     closable: ((false)),
                     showIcon: (true),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_923));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_929));
             }
             __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: ("monitoring-metrics") },
@@ -3399,20 +3416,20 @@ function __VLS_template() {
                 __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     key: ((run.id)),
                 });
-                const __VLS_928 = {}.ElTag;
+                const __VLS_934 = {}.ElTag;
                 /** @type { [typeof __VLS_components.ElTag, typeof __VLS_components.elTag, typeof __VLS_components.ElTag, typeof __VLS_components.elTag, ] } */ ;
                 // @ts-ignore
-                const __VLS_929 = __VLS_asFunctionalComponent(__VLS_928, new __VLS_928({
+                const __VLS_935 = __VLS_asFunctionalComponent(__VLS_934, new __VLS_934({
                     type: ((run.status === 'SUCCESS' ? 'success' : run.status === 'PARTIAL' ? 'warning' : 'danger')),
                     size: ("small"),
                 }));
-                const __VLS_930 = __VLS_929({
+                const __VLS_936 = __VLS_935({
                     type: ((run.status === 'SUCCESS' ? 'success' : run.status === 'PARTIAL' ? 'warning' : 'danger')),
                     size: ("small"),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_929));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_935));
                 (run.status);
-                __VLS_933.slots.default;
-                var __VLS_933;
+                __VLS_939.slots.default;
+                var __VLS_939;
                 __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
                 (__VLS_ctx.formatRecordTime(run.startedAt));
                 __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
