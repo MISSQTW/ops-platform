@@ -3,7 +3,7 @@ epic: ../epics/hertzbeat-observability-loop.md
 phase: acceptance
 approved_revision: 7508fbab27ffeda65ac97ea9644b36207319a77eb2f69d7f03006564044a0667
 current_item: null
-next_action: 对本轮真实告警字段适配变更做独立审查，保留 owner 未接受状态
+next_action: 将真实状态和告警补验结果交 owner 复验；保留此前验收未通过状态，不自动关闭 Epic
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -63,3 +63,5 @@ remote_publish: manual
 - 修复后后端全量 50 项测试及打包通过，包含实际 SingleAlert 标签/恢复时间和冲突关联隔离用例；API 镜像已重建部署。
 - 真实 HertzBeat 接入接口→HertzBeat 列表→平台数据库告警链路通过：临时资产 71，外部 alertId=1 对应平台事件 id=1；两次 firing 同步保持单条，resolved 同步更新原事件并保留 handlingStatus=OPEN，恢复时间 22:25:11.975。此测试通过 HertzBeat 标准 report 接口注入事件，不是阈值引擎自动触发测试。
 - 清理完成：资产 71 及外部监控已删除；HertzBeat 仅含该测试的告警组已删除，平台仅本轮测试告警已按 ID、来源、项目和名称精确清理。三个业务资产未改动；api/postgres/redis 健康，web/hertzbeat/victoriametrics 正常运行。
+- 本轮原生告警 bug 的独立 change review（Parfit，目标 f788810 相对 a239e05）通过，无 blocking/important/nit；该结论范围仅为新告警字段修复，不替代 Epic final acceptance。
+- 线上清理复核：仅业务资产 1/2/3，DOWN/UP/DOWN、abnormalAssetCount=2，测试告警数量为 0。直接读取 Web 实际部署 JS 验证“最近同步尝试”“最近同步成功”“暂无指标采样”“状态未知”均已上线。
