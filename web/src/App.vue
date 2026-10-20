@@ -33,6 +33,14 @@ const inspectionDetailLoading = ref(false)
 const alerts = ref<Alert[]>([])
 const alertExternalFilter = ref('ALL')
 const alertHandlingFilter = ref('ALL')
+const alertLevelFilter = ref('')
+const alertProjectFilter = ref('')
+const alertPlanFilter = ref('')
+const alertAssetFilter = ref('')
+const alertTimeRange = ref<string[] | null>(null)
+const alertProjectOptions = computed(() => [...new Set(alerts.value.map(item => item.projectNameSnapshot || item.projectName))])
+const alertPlanOptions = computed(() => alertObjectOptions('plan'))
+const alertAssetOptions = computed(() => alertObjectOptions('asset'))
 const alertDrawerVisible = ref(false)
 const alertDetailLoading = ref(false)
 const alertActionLoading = ref(false)
@@ -123,6 +131,12 @@ const filteredAlerts = computed(() => {
       && (!pendingAlertsOnly.value || item.handlingStatus === 'OPEN')
       && (alertExternalFilter.value === 'ALL' || item.externalLifecycle === alertExternalFilter.value)
       && (alertHandlingFilter.value === 'ALL' || item.handlingStatus === alertHandlingFilter.value)
+      && (!alertLevelFilter.value || item.level === alertLevelFilter.value)
+      && (!alertProjectFilter.value || (item.projectNameSnapshot || item.projectName) === alertProjectFilter.value)
+      && (!alertPlanFilter.value || alertObjectKey(item, 'plan') === alertPlanFilter.value)
+      && (!alertAssetFilter.value || alertObjectKey(item, 'asset') === alertAssetFilter.value)
+      && (!alertTimeRange.value || (new Date(item.occurredAt).getTime() >= new Date(alertTimeRange.value[0]!).getTime()
+        && new Date(item.occurredAt).getTime() < new Date(alertTimeRange.value[1]!).getTime() + 1000))
       && includesKeyword(item.message, item.projectNameSnapshot || item.projectName, item.targetNameSnapshot || item.targetName, item.inspectionPlanName || ''))
     .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime() || (severityOrder[left.level] ?? 9) - (severityOrder[right.level] ?? 9))
 })
@@ -138,6 +152,21 @@ function currentAssetAlerts(asset: Asset) {
     return (alert.projectNameSnapshot || alert.projectName) === asset.projectName
       && (alert.targetNameSnapshot || alert.targetName) === asset.name
   })
+}
+
+function alertObjectKey(alert: Alert, kind: 'plan' | 'asset') {
+  const id = kind === 'plan' ? alert.inspectionPlanId : alert.assetId
+  const name = kind === 'plan' ? alert.inspectionPlanName : alert.targetNameSnapshot || alert.targetName
+  return id != null ? `id:${id}` : `historical:${JSON.stringify([alert.projectNameSnapshot || alert.projectName, name || ''])}`
+}
+
+function alertObjectOptions(kind: 'plan' | 'asset') {
+  return [...new Map(alerts.value.filter(alert => kind !== 'plan' || alert.inspectionPlanName).map(alert => {
+    const id = kind === 'plan' ? alert.inspectionPlanId : alert.assetId
+    const name = kind === 'plan' ? alert.inspectionPlanName : alert.targetNameSnapshot || alert.targetName
+    const value = alertObjectKey(alert, kind)
+    return [value, { value, label: `${alert.projectNameSnapshot || alert.projectName} · ${name} · ${id == null ? '历史未关联' : `#${id}`}` }]
+  })).values()]
 }
 
 function navigateTo(view: ViewKey) {
@@ -165,6 +194,13 @@ function openProjectServices(item: Project) {
 }
 
 function openProjectAlerts(item: Project) {
+  alertProjectFilter.value = ''
+  alertPlanFilter.value = ''
+  alertAssetFilter.value = ''
+  alertLevelFilter.value = ''
+  alertExternalFilter.value = 'ALL'
+  alertHandlingFilter.value = 'ALL'
+  alertTimeRange.value = null
   selectedProjectName.value = item.name
   globalListSource.value = false
   pendingAlertsOnly.value = false
@@ -693,6 +729,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
 
       <section v-else class="content list-view">
         <div v-if="activeView !== 'inspections'" class="list-summary"><span>当前共 {{ activeView === 'projects' ? filteredProjects.length : activeView === 'assets' ? filteredAssets.length : filteredAlerts.length }} 条记录</span><div class="legend"><i class="ok" />正常<i class="warn" />注意<i class="bad" />异常</div></div>
+        <el-alert v-if="activeView === 'assets' && filteredAssets.some(asset => !inspectionPlans.some(plan => plan.status === 'ENABLED' && plan.assetIds.includes(asset.id)))" type="info" :closable="false">
+          <template #title>部分服务未配置启用的巡检计划，请前往巡检中心配置。</template>
+          <el-button link type="primary" @click="navigateTo('inspections')">配置巡检计划</el-button>
+        </el-alert>
 
         <div v-if="activeView === 'projects'" class="project-grid">
           <article v-for="item in filteredProjects" :key="item.id" class="project-card" @click="openProjectDetail(item)"><div class="project-head"><div class="project-symbol">{{ item.name.slice(0, 1) }}</div><div class="card-actions"><el-tag :type="badge(item.status)" effect="light">{{ statusText(item.status) }}</el-tag><button title="编辑项目" @click.stop="openProjectEdit(item)"><Pencil :size="15" /></button><button title="删除项目" class="danger-action" @click.stop="removeProject(item)"><Trash2 :size="15" /></button></div></div><h3>{{ item.name }}</h3><p>{{ item.description }}</p><div class="project-meta"><span>{{ item.projectType || '业务系统' }}</span><strong>{{ item.owner }}</strong></div><div class="project-footer"><button @click.stop="openProjectServices(item)"><Server :size="14" />{{ assets.filter(asset => asset.projectName === item.name).length }} 项服务<ChevronRight :size="14" /></button><button @click.stop="openProjectAlerts(item)"><AlertTriangle :size="14" />{{ alerts.filter(alert => (alert.projectNameSnapshot || alert.projectName) === item.name && alert.handlingStatus === 'OPEN').length }} 个告警<ChevronRight :size="14" /></button></div></article>
@@ -720,6 +760,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
         </div>
 
         <div v-if="activeView === 'alerts'" class="table-panel">
+          <div class="alert-filters" style="flex-wrap: wrap">
+            <el-select v-model="alertProjectFilter" :disabled="Boolean(selectedProjectName)" clearable placeholder="全部项目" aria-label="项目筛选" style="width: 160px"><el-option v-for="name in alertProjectOptions" :key="name" :label="name" :value="name" /></el-select>
+            <el-select v-model="alertPlanFilter" clearable placeholder="全部计划" aria-label="计划筛选" style="width: 160px"><el-option v-for="option in alertPlanOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select>
+            <el-select v-model="alertAssetFilter" clearable placeholder="全部服务" aria-label="服务筛选" style="width: 160px"><el-option v-for="option in alertAssetOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select>
+            <el-select v-model="alertLevelFilter" clearable placeholder="全部级别" aria-label="级别筛选" style="width: 130px"><el-option label="异常" value="CRITICAL" /><el-option label="注意" value="WARNING" /><el-option label="提示" value="INFO" /></el-select>
+            <el-date-picker v-model="alertTimeRange" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间" end-placeholder="结束时间" aria-label="告警时间范围" style="max-width: 100%" />
+          </div>
           <div class="alert-filters"><el-select v-model="alertExternalFilter" aria-label="外部状态筛选" style="width: 140px"><el-option label="全部外部状态" value="ALL" /><el-option label="告警中" value="FIRING" /><el-option label="已恢复" value="RESOLVED" /></el-select><el-select v-model="alertHandlingFilter" aria-label="处置状态筛选" style="width: 140px"><el-option label="全部处置状态" value="ALL" /><el-option label="待处理" value="OPEN" /><el-option label="已确认" value="ACKNOWLEDGED" /><el-option label="已关闭" value="CLOSED" /></el-select></div>
           <el-table :data="filteredAlerts" stripe @row-click="openAlertDetail"><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column prop="message" label="告警内容" min-width="240" /><el-table-column label="所属项目" min-width="150"><template #default="scope">{{ scope.row.projectNameSnapshot || scope.row.projectName }}</template></el-table-column><el-table-column prop="inspectionPlanName" label="巡检计划" min-width="150"><template #default="scope">{{ scope.row.inspectionPlanName || '--' }}</template></el-table-column><el-table-column label="告警对象" min-width="150"><template #default="scope">{{ scope.row.targetNameSnapshot || scope.row.targetName }}</template></el-table-column><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="外部状态" width="100"><template #default="scope"><el-tag :type="scope.row.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(scope.row.externalLifecycle || 'FIRING') }}</el-tag></template></el-table-column><el-table-column label="处置状态" width="110"><template #default="scope"><el-tag :type="badge(scope.row.handlingStatus)" effect="light">{{ statusText(scope.row.handlingStatus) }}</el-tag></template></el-table-column><el-table-column label="操作" width="72" fixed="right"><template #default="scope"><button class="icon-button" title="查看告警详情" @click.stop="openAlertDetail(scope.row)"><ChevronRight :size="16" /></button></template></el-table-column></el-table>
         </div>
@@ -755,6 +802,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
 
     <el-drawer v-model="projectDrawerVisible" :title="selectedProject ? `项目详情 · ${selectedProject.name}` : '项目详情'" size="520px" append-to-body>
       <div v-if="selectedProject" class="project-detail">
+        <p>服务状态：{{ selectedProjectAssets.filter(asset => !isAbnormalStatus(asset.status)).length }} 项未确认异常，{{ selectedProjectAssets.filter(asset => isAbnormalStatus(asset.status)).length }} 项异常；历史告警 {{ selectedProjectAlerts.length }} 条，已关闭 {{ selectedProjectAlerts.filter(alert => alert.handlingStatus === 'CLOSED').length }} 条。</p>
         <div class="project-detail-summary"><div><span>项目类型</span><strong>{{ selectedProject.projectType || '业务系统' }}</strong></div><div><span>运行状态</span><el-tag :type="badge(selectedProject.status)">{{ statusText(selectedProject.status) }}</el-tag></div></div>
         <dl class="alert-context"><div><dt>负责人</dt><dd>{{ selectedProject.owner }}</dd></div><div><dt>联系方式</dt><dd>{{ selectedProject.contactPhone || '--' }}</dd></div><div><dt>运维到期日</dt><dd>{{ selectedProject.maintenanceExpiresAt || '--' }}</dd></div><div><dt>项目说明</dt><dd>{{ selectedProject.description || '--' }}</dd></div></dl>
         <div class="project-detail-metrics"><button @click="projectDrawerVisible = false; openProjectServices(selectedProject)"><strong>{{ selectedProjectAssets.length }}</strong><span>纳管服务</span></button><button @click="projectDrawerVisible = false; navigateTo('inspections')"><strong>{{ selectedProjectPlans.length }}</strong><span>巡检计划</span></button><button @click="projectDrawerVisible = false; openProjectAlerts(selectedProject)"><strong>{{ selectedProjectAlerts.filter(item => item.handlingStatus !== 'CLOSED').length }}</strong><span>当前告警</span></button></div>
