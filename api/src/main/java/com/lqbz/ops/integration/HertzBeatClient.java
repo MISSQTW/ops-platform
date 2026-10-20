@@ -259,6 +259,21 @@ public class HertzBeatClient {
     return new MetricTarget(target.app(), target.instance());
   }
 
+  public List<Map<String, Object>> monitorParameters(Asset asset) {
+    return monitorTarget(asset).params();
+  }
+
+  public boolean monitorParametersMatch(Asset asset, List<Map<String, Object>> actual) {
+    if (actual == null) return false;
+    for (Map<String, Object> expected : monitorParameters(asset)) {
+      List<Map<String, Object>> matching = actual.stream()
+          .filter(parameter -> expected.get("field").equals(parameter.get("field"))).toList();
+      if (matching.size() != 1 || !String.valueOf(expected.get("paramValue"))
+          .equals(String.valueOf(matching.getFirst().get("paramValue")))) return false;
+    }
+    return true;
+  }
+
   public void deleteMonitor(long monitorId) throws Exception {
     String token = login();
     HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/monitor/" + monitorId))
@@ -484,6 +499,7 @@ public class HertzBeatClient {
     if ("HTTP".equalsIgnoreCase(asset.getType())) {
       int port = endpoint.getPort() > 0 ? endpoint.getPort() : "https".equalsIgnoreCase(endpoint.getScheme()) ? 443 : 80;
       String uri = endpoint.getRawPath() == null || endpoint.getRawPath().isBlank() ? "/" : endpoint.getRawPath();
+      if (endpoint.getRawQuery() != null) uri += "?" + endpoint.getRawQuery();
       boolean ssl = "https".equalsIgnoreCase(endpoint.getScheme());
       return new MonitorTarget("website", host + ":" + port, List.of(
           param("host", host, 1), param("port", String.valueOf(port), 0), param("uri", uri, 1),

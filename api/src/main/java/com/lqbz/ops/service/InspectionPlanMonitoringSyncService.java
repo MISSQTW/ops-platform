@@ -260,6 +260,7 @@ public class InspectionPlanMonitoringSyncService {
     return asset.getName().equals(config.name()) && target.app().equals(config.app())
         && target.instance().equals(config.instance()) && plan.getIntervalSeconds() == config.intervalSeconds()
         && "fixed".equals(config.scheduleType()) && enabled == config.enabled()
+        && hertzBeatClient.monitorParametersMatch(asset, config.params())
         && String.valueOf(asset.getId()).equals(config.labels().get("assetId"))
         && asset.getProjectName().equals(config.labels().get("project"))
         && asset.getEnvironmentName().equals(config.labels().get("environment"));

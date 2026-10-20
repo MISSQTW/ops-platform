@@ -69,6 +69,8 @@ class InspectionPlanMonitoringSyncTest {
           return new HertzBeatClient.SyncResult(501L, "同步成功");
         });
     when(hertzBeatClient.getMonitorConfig(501L)).thenAnswer(invocation -> monitorConfig());
+    when(hertzBeatClient.monitorParametersMatch(any(), any())).thenAnswer(invocation ->
+        parameterClient().monitorParametersMatch(invocation.getArgument(0), invocation.getArgument(1)));
     when(hertzBeatClient.metricTarget(any())).thenAnswer(invocation -> {
       Asset asset = invocation.getArgument(0);
       URI endpoint = URI.create(asset.getEndpoint());
@@ -299,6 +301,37 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
+  void Monitor写后参数仍漂移必须保留失败重试() throws Exception {
+    Fixture fixture = fixture("写后漂移系统", "写后漂移接口");
+    var plan = policyService.create(request("写后漂移计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    HertzBeatClient.MonitorConfig stale = monitorConfig();
+    when(hertzBeatClient.getMonitorConfig(501L)).thenReturn(stale);
+
+    policyService.updateAsset(fixture.asset().getId(), fixture.asset().getName(), fixture.project().getName(),
+        "生产", "HTTP", "https://example.com/ready", "UNKNOWN");
+
+    assertThat(plans.findById(plan.id()).orElseThrow().getSyncStatus()).isEqualTo("FAILED");
+    assertThat(tasks.findByPlanIdOrderByCreatedAt(plan.id()).stream()
+        .filter(task -> task.getDesiredVersion().equals(2L)).toList())
+        .singleElement().satisfies(task -> assertThat(task.getStatus()).isEqualTo("RETRY"));
+  }
+
+  @Test
+  void 同主机HTTP路径变化必须重新下发Monitor参数() throws Exception {
+    Fixture fixture = fixture("路径变更系统", "路径接口");
+    var plan = policyService.create(request("路径计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    clearInvocations(hertzBeatClient);
+
+    policyService.updateAsset(fixture.asset().getId(), fixture.asset().getName(), fixture.project().getName(),
+        "生产", "HTTP", "https://example.com/ready", "UNKNOWN");
+
+    verify(hertzBeatClient).syncMonitor(argThat(asset -> asset.getEndpoint().endsWith("/ready")), eq(300), eq(true));
+    assertThat(plans.findById(plan.id()).orElseThrow().getSyncStatus()).isEqualTo("SYNCED");
+  }
+
+  @Test
   void 服务关联启用或停用计划时不得跨项目移动() {
     Fixture fixture = fixture("项目归属系统", "归属接口");
     Project other = projects.save(new Project("另一个系统", "业务系统", "负责人", null, null, null, "RUNNING"));
@@ -513,7 +546,11 @@ class InspectionPlanMonitoringSyncTest {
     return new HertzBeatClient.MonitorConfig(monitorId, asset.getName(), "website", instance,
         lastInterval.get(), "fixed", lastEnabled.get(), java.util.Map.of(
             "assetId", String.valueOf(asset.getId()), "project", asset.getProjectName(),
-            "environment", asset.getEnvironmentName()), List.of());
+            "environment", asset.getEnvironmentName()), parameterClient().monitorParameters(asset));
+  }
+
+  private HertzBeatClient parameterClient() {
+    return new HertzBeatClient(new com.fasterxml.jackson.databind.ObjectMapper(), "http://localhost", "", "");
   }
 
   private void await(CountDownLatch latch) {
