@@ -2,8 +2,12 @@ package com.lqbz.ops.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.lqbz.ops.domain.AlertHandlingEvent;
+import com.lqbz.ops.domain.AlertHandlingEventRepository;
 import com.lqbz.ops.domain.AlertRepository;
 import com.lqbz.ops.domain.Asset;
 import com.lqbz.ops.domain.AssetRepository;
@@ -19,10 +23,12 @@ import org.junit.jupiter.api.Test;
 class MonitoringProjectionServiceTest {
   private final AssetRepository assets = mock(AssetRepository.class);
   private final AlertRepository alerts = mock(AlertRepository.class);
+  private final AlertHandlingEventRepository alertEvents = mock(AlertHandlingEventRepository.class);
   private final HertzBeatClient client = mock(HertzBeatClient.class);
   private final InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
   private final InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
-  private final MonitoringProjectionService service = new MonitoringProjectionService(assets, alerts, client, bindings, plans);
+  private final MonitoringProjectionService service = new MonitoringProjectionService(
+      assets, alerts, alertEvents, client, bindings, plans);
 
   @Test
   void 状态同步成功应更新资产并清除陈旧标记() throws Exception {
@@ -85,6 +91,49 @@ class MonitoringProjectionServiceTest {
 
     assertThat(result.alertsUpdated()).isEqualTo(1);
     assertThat(existing.getExternalLifecycle()).isEqualTo("RESOLVED");
+  }
+
+  @Test
+  void 已恢复告警再次触发应重开并记录新周期事件() throws Exception {
+    Asset asset = asset();
+    asset.markSynced(321L, "同步成功");
+    com.lqbz.ops.domain.Alert existing = com.lqbz.ops.domain.Alert.external("HERTZBEAT", "reopen-1", 321L,
+        "CRITICAL", "订单平台", "订单接口", "接口不可用", LocalDateTime.now().minusMinutes(10));
+    existing.acknowledge();
+    existing.resolve(LocalDateTime.now().minusMinutes(5));
+    when(assets.findByMonitoringMode("HERTZBEAT")).thenReturn(List.of(asset));
+    when(client.monitorStatus(321L)).thenReturn(new HertzBeatClient.MonitorStatus("DOWN", LocalDateTime.now(), false));
+    when(client.alerts("firing")).thenReturn(List.of(new HertzBeatClient.ExternalAlert("reopen-1", 321L,
+        "CRITICAL", "接口再次不可用", LocalDateTime.now(), null)));
+    when(client.alerts("resolved")).thenReturn(List.of());
+    when(alerts.findByExternalSourceAndExternalAlertId("HERTZBEAT", "reopen-1")).thenReturn(Optional.of(existing));
+    org.mockito.ArgumentCaptor<AlertHandlingEvent> event = org.mockito.ArgumentCaptor.forClass(AlertHandlingEvent.class);
+
+    service.sync(LocalDateTime.now());
+
+    assertThat(existing.getHandlingStatus()).isEqualTo("OPEN");
+    org.mockito.Mockito.verify(alertEvents).save(event.capture());
+    assertThat(event.getValue().getAction()).isEqualTo("REOPENED");
+    assertThat(event.getValue().getFromStatus()).isEqualTo("ACKNOWLEDGED");
+    assertThat(event.getValue().getToStatus()).isEqualTo("OPEN");
+  }
+
+  @Test
+  void 重复firing同步不得新增重开事件() throws Exception {
+    Asset asset = asset();
+    asset.markSynced(321L, "同步成功");
+    com.lqbz.ops.domain.Alert existing = com.lqbz.ops.domain.Alert.external("HERTZBEAT", "ongoing-1", 321L,
+        "CRITICAL", "订单平台", "订单接口", "接口不可用", LocalDateTime.now().minusMinutes(10));
+    when(assets.findByMonitoringMode("HERTZBEAT")).thenReturn(List.of(asset));
+    when(client.monitorStatus(321L)).thenReturn(new HertzBeatClient.MonitorStatus("DOWN", LocalDateTime.now(), false));
+    when(client.alerts("firing")).thenReturn(List.of(new HertzBeatClient.ExternalAlert("ongoing-1", 321L,
+        "CRITICAL", "接口仍不可用", LocalDateTime.now(), null)));
+    when(client.alerts("resolved")).thenReturn(List.of());
+    when(alerts.findByExternalSourceAndExternalAlertId("HERTZBEAT", "ongoing-1")).thenReturn(Optional.of(existing));
+
+    service.sync(LocalDateTime.now());
+
+    verify(alertEvents, never()).save(org.mockito.ArgumentMatchers.any());
   }
 
   @Test

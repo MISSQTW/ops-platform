@@ -7,12 +7,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "ops_alert", uniqueConstraints = @UniqueConstraint(columnNames = {"externalSource", "externalAlertId"}))
 public class Alert {
   @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+  @Version
+  private Long version;
   private String level;
   private String projectName;
   private String targetName;
@@ -46,7 +49,14 @@ public class Alert {
     this.message = message;
     this.status = status;
     this.occurredAt = occurredAt;
-    this.handlingStatus = status;
+    this.externalLifecycle = "RESOLVED".equals(status) ? "RESOLVED" : "FIRING";
+    this.handlingStatus = switch (status) {
+      case "ACKNOWLEDGED", "CLOSED" -> status;
+      default -> "OPEN";
+    };
+    this.firstOccurredAt = occurredAt;
+    this.lastOccurredAt = occurredAt;
+    this.resolvedAt = "RESOLVED".equals(status) ? occurredAt : null;
   }
 
   public static Alert external(String source, String externalId, Long monitorId, String level, String projectName,
@@ -62,11 +72,21 @@ public class Alert {
     return alert;
   }
 
-  public void fire(String message, LocalDateTime occurredAt) {
+  public boolean fire(String message, LocalDateTime occurredAt) {
+    boolean newCycle = "RESOLVED".equals(this.externalLifecycle);
     this.externalLifecycle = "FIRING";
     this.message = message;
     this.lastOccurredAt = occurredAt;
     this.resolvedAt = null;
+    if (newCycle) {
+      this.occurredAt = occurredAt;
+      this.handlingStatus = "OPEN";
+      this.status = "OPEN";
+      this.handledBy = null;
+      this.handledAt = null;
+      this.handlingNote = null;
+    }
+    return newCycle;
   }
 
   public void resolve(LocalDateTime resolvedAt) {
@@ -86,8 +106,28 @@ public class Alert {
   }
 
   public void acknowledge() {
+    if (!"OPEN".equals(getHandlingStatus())) throw new IllegalStateException("只有待处理告警可以确认");
     this.handlingStatus = "ACKNOWLEDGED";
     this.status = "ACKNOWLEDGED";
+  }
+
+  public void acknowledge(String operator, String note, LocalDateTime handledAt) {
+    acknowledge();
+    recordHandling(operator, note, handledAt);
+  }
+
+  public void close(String operator, String note, LocalDateTime handledAt) {
+    if (!"RESOLVED".equals(externalLifecycle)) throw new IllegalStateException("外部告警恢复后才能关闭");
+    if ("CLOSED".equals(getHandlingStatus())) throw new IllegalStateException("告警已经关闭");
+    this.handlingStatus = "CLOSED";
+    this.status = "CLOSED";
+    recordHandling(operator, note, handledAt);
+  }
+
+  private void recordHandling(String operator, String note, LocalDateTime handledAt) {
+    this.handledBy = operator;
+    this.handledAt = handledAt;
+    this.handlingNote = note;
   }
 
   public Long getId() { return id; }

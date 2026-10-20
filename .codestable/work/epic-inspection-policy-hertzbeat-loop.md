@@ -2,8 +2,8 @@
 epic: ../epics/inspection-policy-hertzbeat-loop.md
 phase: executing
 approved_revision: dc3ee008133559e332fa9bfbab9366fd5f68bcd31f907a61152b15408853b1a8
-current_item: ITEM-5
-next_action: 完善告警双状态处置、重开语义、归属快照与筛选详情接口
+current_item: ITEM-6
+next_action: 完善项目档案与服务操作面，移除服务页同步入口并补齐计划同步状态展示
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -14,7 +14,7 @@ remote_publish: manual
 - [x] ITEM-2
 - [x] ITEM-3
 - [x] ITEM-4
-- [ ] ITEM-5
+- [x] ITEM-5
 - [ ] ITEM-6
 - [ ] ITEM-7
 
@@ -79,3 +79,6 @@ remote_publish: manual
 - ITEM-4 实现：服务 binding 仅在当前期望版本、所有权有效且 Monitor/告警规则均实际启用并具备外部 ID 时切换到 HertzBeat；同步失败、部分成功或计划版本漂移继续本地周期检查。新监控计划立即进入兜底调度，本地扫描默认 10 秒并支持秒级计划续跑；全部服务完成切换后仅推进计划时间，不再生成正式巡检记录。
 - ITEM-4 地址测试：新增 `POST /api/assets/{id}/test-address`，复用 HTTP/TCP 检查器返回即时结果，不保存巡检记录、不产生告警、不写入资产状态；旧巡检计划及既有历史记录结构保持兼容。
 - ITEM-4 验证与 change review：新增同步完成跳过、同步失败兜底、期望版本漂移兜底、地址测试不覆盖 HertzBeat 状态、首次到期、秒级续跑和 10 秒扫描配置测试；沙箱外完整 111 项后端测试通过，`git diff --cached --check` 通过。fresh reviewer Carson 三轮审查 staged SHA-256 `38bc01d75eb0bae352b716f51ebbe95224b155a0ba2bc52567a41a8f5a01602c`，确认首次调度、秒级续跑和最小扫描周期 findings 全部 resolved，无新增 blocking、important 或 nit；ITEM-4 gate 通过。
+- ITEM-5 实现：告警建立外部生命周期与平台处置双状态，支持筛选、详情、确认、备注、关闭和处置事件历史；外部 `RESOLVED -> FIRING` 新周期重开为 `OPEN`，重复 firing 保持幂等；归属快照展示项目、巡检计划和服务，关闭仅允许外部已恢复告警。
+- ITEM-5 迁移与兼容：V4 创建处置事件表和索引，补齐历史告警双状态、首次/最近发生、恢复时间和乐观锁版本回填；临时 PostgreSQL 库 `ops_platform_v4_check_20261020_1820` 验证四类历史状态、事件表/索引及 `version NOT NULL DEFAULT 0` 全部正确。
+- ITEM-5 验证与 change review：沙箱外完整 120 项后端测试通过，前端构建通过；390×844 视口实测告警详情抽屉 `x=0`、宽 390px。fresh reviewer Mendel 首轮指出备注覆盖状态转换信息及事件备注未规范化，修复为备注仅写事件历史并统一 trim；第二轮审查 staged SHA-256 `6d13e6900e64cf07bd4b546daf531ac6ac398b39fa80b77718c358f28fbab249`，无 blocking、important 或 nit；ITEM-5 gate 通过。

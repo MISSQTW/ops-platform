@@ -1,6 +1,8 @@
 package com.lqbz.ops.integration;
 
 import com.lqbz.ops.domain.Alert;
+import com.lqbz.ops.domain.AlertHandlingEvent;
+import com.lqbz.ops.domain.AlertHandlingEventRepository;
 import com.lqbz.ops.domain.AlertRepository;
 import com.lqbz.ops.domain.Asset;
 import com.lqbz.ops.domain.AssetRepository;
@@ -16,14 +18,17 @@ import org.springframework.transaction.annotation.Transactional;
 public class MonitoringProjectionService {
   private final AssetRepository assets;
   private final AlertRepository alerts;
+  private final AlertHandlingEventRepository alertEvents;
   private final HertzBeatClient client;
   private final InspectionPlanBindingRepository bindings;
   private final InspectionPlanRepository plans;
 
-  public MonitoringProjectionService(AssetRepository assets, AlertRepository alerts, HertzBeatClient client,
+  public MonitoringProjectionService(AssetRepository assets, AlertRepository alerts,
+      AlertHandlingEventRepository alertEvents, HertzBeatClient client,
       InspectionPlanBindingRepository bindings, InspectionPlanRepository plans) {
     this.assets = assets;
     this.alerts = alerts;
+    this.alertEvents = alertEvents;
     this.client = client;
     this.bindings = bindings;
     this.plans = plans;
@@ -80,9 +85,16 @@ public class MonitoringProjectionService {
       bindings.findByActiveOwnerKey(asset.getId()).flatMap(binding -> plans.findById(binding.getPlanId()))
           .ifPresent(plan -> alert.assignOwnershipSnapshot(plan.getProjectId(), plan.getId(), asset.getId(),
               plan.getName(), plan.getProjectName(), asset.getName()));
+      boolean reopened = false;
+      String previousHandlingStatus = alert.getHandlingStatus();
+      LocalDateTime eventAt = external.occurredAt() == null ? LocalDateTime.now() : external.occurredAt();
       if (resolved) alert.resolve(external.resolvedAt() == null ? LocalDateTime.now() : external.resolvedAt());
-      else alert.fire(external.message(), external.occurredAt() == null ? LocalDateTime.now() : external.occurredAt());
+      else reopened = alert.fire(external.message(), eventAt);
       alerts.save(alert);
+      if (reopened) {
+        alertEvents.save(new AlertHandlingEvent(alert.getId(), "REOPENED", previousHandlingStatus,
+            alert.getHandlingStatus(), "HertzBeat", "外部告警进入新的 firing 周期", eventAt));
+      }
       updated++;
     }
     return updated;

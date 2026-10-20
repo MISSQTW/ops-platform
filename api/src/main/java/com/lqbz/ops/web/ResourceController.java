@@ -65,7 +65,6 @@ public class ResourceController {
   @GetMapping("/projects") public List<Project> projects() { return projects.findAll(Sort.by("id")); }
   @GetMapping("/assets") public List<Asset> assets() { return assets.findAll(Sort.by("id")); }
   @GetMapping("/inspections") public List<Inspection> inspections() { return inspections.findAll(Sort.by(Sort.Direction.DESC, "executedAt")); }
-  @GetMapping("/alerts") public List<Alert> alerts() { return alerts.findAll(Sort.by(Sort.Direction.DESC, "occurredAt")); }
   @GetMapping("/audits") public List<AuditLog> audits() { return audits.findAll(Sort.by(Sort.Direction.DESC, "operatedAt")); }
   @GetMapping("/inspection-plans") public List<InspectionPlanPolicyService.InspectionPlanView> inspectionPlans() {
     return inspectionPlanPolicyService.list();
