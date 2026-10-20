@@ -139,6 +139,7 @@ public class InspectionPlanPolicyService {
   public InspectionPlanView requestDelete(Long id) {
     InspectionPlan plan = plans.findByIdForUpdate(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     if (!plan.isMonitoringPolicy()) throw new IllegalArgumentException("旧巡检计划不支持逻辑删除");
+    if ("DELETED".equals(plan.getLifecycleStatus())) return view(plan);
     plan.markDeleting();
     bindings.findByPlanIdOrderById(plan.getId()).stream()
         .filter(binding -> !"RELEASED".equals(binding.getOwnershipStatus()))

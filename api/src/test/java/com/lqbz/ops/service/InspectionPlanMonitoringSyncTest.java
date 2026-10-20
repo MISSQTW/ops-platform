@@ -210,6 +210,10 @@ class InspectionPlanMonitoringSyncTest {
     assertThat(plans.findById(plan.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
     verify(hertzBeatClient).deleteAlertRule(601L);
     verify(hertzBeatClient).deleteMonitor(501L);
+    Long deletedVersion = plans.findById(plan.id()).orElseThrow().getDesiredVersion();
+    policyService.requestDelete(plan.id());
+    assertThat(plans.findById(plan.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+    assertThat(plans.findById(plan.id()).orElseThrow().getDesiredVersion()).isEqualTo(deletedVersion);
   }
 
   @Test
