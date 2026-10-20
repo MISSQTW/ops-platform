@@ -180,7 +180,7 @@ public class InspectionPlanMonitoringSyncService {
     try {
       if (!ruleMatches(alertRule, plan, asset, enabled)) {
         rule = hertzBeatClient.upsertAlertRule(new HertzBeatClient.AlertRuleSpec(
-            alertRuleId, ruleName(plan, asset), "availability == 0", plan.getIntervalSeconds(),
+            alertRuleId, ruleName(plan, asset), availabilityExpression(asset), plan.getIntervalSeconds(),
             plan.getFailureThreshold(), plan.getAlertLevel(), plan.getId(), asset.getId(), enabled));
       }
       if (!ruleMatches(rule, plan, asset, enabled)) throw new IllegalStateException("HertzBeat 告警规则写后校验不一致");
@@ -266,14 +266,20 @@ public class InspectionPlanMonitoringSyncService {
   }
 
   private boolean ruleMatches(HertzBeatClient.AlertRule rule, InspectionPlan plan, Asset asset, boolean enabled) {
-    return rule != null && ruleName(plan, asset).equals(rule.name()) && "realtime".equals(rule.type())
-        && "availability == 0".equals(rule.expression()) && plan.getIntervalSeconds() == rule.period()
+    return rule != null && ruleName(plan, asset).equals(rule.name()) && "realtime_metric".equals(rule.type())
+        && availabilityExpression(asset).equals(rule.expression()) && plan.getIntervalSeconds() == rule.period()
         && plan.getFailureThreshold() == rule.times() && enabled == rule.enable()
         && "hertzbeat".equals(rule.datasource())
         && "ops-platform".equals(rule.labels().get("managedBy"))
         && String.valueOf(plan.getId()).equals(rule.labels().get("planId"))
         && String.valueOf(asset.getId()).equals(rule.labels().get("assetId"))
         && plan.getAlertLevel().toLowerCase().equals(rule.labels().get("severity"));
+  }
+
+  private String availabilityExpression(Asset asset) {
+    return "equals(__app__,\"" + hertzBeatClient.metricTarget(asset).app()
+        + "\") && equals(__instance__,\"" + asset.getHertzbeatMonitorId()
+        + "\") && equals(__available__,\"down\")";
   }
 
   public record SyncSummary(Long planId, String status, int processedTasks, String error) {}

@@ -158,7 +158,7 @@ class HertzBeatClientTest {
     assertThat(requests).singleElement();
     JsonNode body = objectMapper.readTree(requests.getFirst().body());
     assertThat(requests.getFirst().method()).isEqualTo("POST");
-    assertThat(body.path("type").asText()).isEqualTo("realtime");
+    assertThat(body.path("type").asText()).isEqualTo("realtime_metric");
     assertThat(body.path("expr").asText()).isEqualTo("availability == 0");
     assertThat(body.path("labels").path("severity").asText()).isEqualTo("critical");
     assertThat(body.path("labels").path("planId").asText()).isEqualTo("12");

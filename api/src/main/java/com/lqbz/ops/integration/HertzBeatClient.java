@@ -116,7 +116,7 @@ public class HertzBeatClient {
     Map<String, Object> body = new LinkedHashMap<>();
     if (ruleId != null) body.put("id", ruleId);
     body.put("name", spec.name());
-    body.put("type", "realtime");
+    body.put("type", "realtime_metric");
     body.put("expr", spec.expression());
     body.put("period", spec.period());
     body.put("times", spec.times());

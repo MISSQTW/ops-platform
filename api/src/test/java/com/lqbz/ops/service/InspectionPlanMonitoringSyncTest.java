@@ -78,7 +78,7 @@ class InspectionPlanMonitoringSyncTest {
     when(hertzBeatClient.upsertAlertRule(any()))
         .thenAnswer(invocation -> {
           HertzBeatClient.AlertRuleSpec spec = invocation.getArgument(0);
-          return new HertzBeatClient.AlertRule(601L, spec.name(), "realtime", spec.expression(), spec.period(),
+          return new HertzBeatClient.AlertRule(601L, spec.name(), "realtime_metric", spec.expression(), spec.period(),
               spec.times(), spec.enable(), "hertzbeat", java.util.Map.of(
                   "managedBy", "ops-platform", "planId", String.valueOf(spec.planId()),
                   "assetId", String.valueOf(spec.assetId()), "severity", spec.level().toLowerCase()),
@@ -87,7 +87,7 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
-  void 保存计划后应自动同步Monitor和告警规则() {
+  void 保存计划后应自动同步Monitor和告警规则() throws Exception {
     Fixture fixture = fixture("自动同步系统", "自动同步接口");
 
     InspectionPlanPolicyService.InspectionPlanView plan = policyService.create(request(
@@ -98,6 +98,8 @@ class InspectionPlanMonitoringSyncTest {
     assertThat(binding.getHertzbeatAlertRuleId()).isEqualTo(601L);
     assertThat(binding.getMonitorActualState()).isEqualTo("ENABLED");
     assertThat(binding.getRuleActualState()).isEqualTo("ENABLED");
+    org.mockito.Mockito.verify(hertzBeatClient).upsertAlertRule(org.mockito.ArgumentMatchers.argThat(spec ->
+        spec.expression().equals("equals(__app__,\"website\") && equals(__instance__,\"501\") && equals(__available__,\"down\")")));
     assertThat(tasks.findByPlanIdOrderByCreatedAt(plan.id())).singleElement()
         .extracting(MonitoringConfigTask::getStatus).isEqualTo("SUCCEEDED");
     assertThat(plans.findById(plan.id()).orElseThrow().getSyncStatus()).isEqualTo("SYNCED");
@@ -223,6 +225,37 @@ class InspectionPlanMonitoringSyncTest {
     syncService.reconcile();
 
     assertThat(tasks.findById(task.getId()).orElseThrow().getStatus()).isEqualTo("SUCCEEDED");
+  }
+
+  @Test
+  void Monitor重建后应更新原规则中的实例ID() throws Exception {
+    Fixture fixture = fixture("监控重建系统", "监控重建接口");
+    InspectionPlanPolicyService.InspectionPlanView plan = policyService.create(request(
+        "监控重建计划", fixture.project().getId(), fixture.project().getName(), List.of(fixture.asset().getId())));
+    var ruleCaptor = org.mockito.ArgumentCaptor.forClass(HertzBeatClient.AlertRuleSpec.class);
+    verify(hertzBeatClient).upsertAlertRule(ruleCaptor.capture());
+    HertzBeatClient.AlertRuleSpec original = ruleCaptor.getValue();
+    when(hertzBeatClient.getAlertRule(601L)).thenReturn(new HertzBeatClient.AlertRule(
+        601L, original.name(), "realtime_metric", original.expression(), original.period(), original.times(),
+        original.enable(), "hertzbeat", java.util.Map.of("managedBy", "ops-platform",
+            "planId", String.valueOf(plan.id()), "assetId", String.valueOf(fixture.asset().getId()),
+            "severity", "critical"), java.util.Map.of("summary", original.name())));
+    when(hertzBeatClient.getMonitorConfig(501L)).thenThrow(new HertzBeatClient.MonitorNotFoundException(501L));
+    when(hertzBeatClient.syncMonitor(any(), any(Integer.class), any(Boolean.class)))
+        .thenAnswer(invocation -> {
+          lastSyncedAsset.set(invocation.getArgument(0));
+          lastInterval.set(invocation.getArgument(1));
+          lastEnabled.set(invocation.getArgument(2));
+          return new HertzBeatClient.SyncResult(502L, "重建成功");
+        });
+    when(hertzBeatClient.getMonitorConfig(502L)).thenAnswer(invocation -> monitorConfig(502L));
+    clearInvocations(hertzBeatClient);
+
+    syncService.syncPlan(plan.id());
+
+    verify(hertzBeatClient).upsertAlertRule(argThat(spec -> Long.valueOf(601L).equals(spec.id())
+        && spec.expression().equals("equals(__app__,\"website\") && equals(__instance__,\"502\") && equals(__available__,\"down\")")));
+    assertThat(plans.findById(plan.id()).orElseThrow().getSyncStatus()).isEqualTo("SYNCED");
   }
 
   @Test
