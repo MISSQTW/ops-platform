@@ -184,6 +184,10 @@ public class InspectionPlanPolicyService {
     List<InspectionPlanBinding> affectedBindings = lockedPlan == null ? List.of()
         : bindings.findCurrentForUpdate(lockedPlan.getId(), assetId).stream().toList();
     Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("服务不存在"));
+    if (!asset.getProjectName().equals(projectName)
+        && bindings.existsByAssetIdAndOwnershipStatusNot(assetId, "RELEASED")) {
+      throw new IllegalStateException("服务仍关联巡检计划，请先移除并完成清理后再变更项目");
+    }
     asset.update(name, projectName, valueOr(environmentName, asset.getEnvironmentName()), type, endpoint,
         valueOr(status, asset.getStatus()));
     for (InspectionPlanBinding binding : affectedBindings) {
@@ -191,7 +195,8 @@ public class InspectionPlanPolicyService {
       InspectionPlan plan = lockedPlan;
       if (plan == null || !plan.isMonitoringPolicy() || !"ACTIVE".equals(plan.getLifecycleStatus())) continue;
       plan.touchDesiredVersion();
-      binding.alignWithPlanStatus(plan.getStatus(), plan.getDesiredVersion());
+      bindings.findByPlanIdOrderById(plan.getId()).forEach(current ->
+          current.advanceDesiredVersion(plan.getDesiredVersion()));
       enqueueAndPublish(plan);
     }
     return asset;

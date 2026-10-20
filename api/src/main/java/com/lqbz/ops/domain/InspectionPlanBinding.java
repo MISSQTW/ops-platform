@@ -59,6 +59,10 @@ public class InspectionPlanBinding {
     this.ruleDesiredState = desiredState;
   }
 
+  public void advanceDesiredVersion(long desiredVersion) {
+    if (!"RELEASED".equals(ownershipStatus)) this.desiredVersion = desiredVersion;
+  }
+
   public static InspectionPlanBinding claimExisting(Long planId, Long assetId, long desiredVersion, Long monitorId) {
     InspectionPlanBinding binding = managed(planId, assetId, desiredVersion);
     binding.hertzbeatMonitorId = monitorId;

@@ -299,6 +299,39 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
+  void 服务关联启用或停用计划时不得跨项目移动() {
+    Fixture fixture = fixture("项目归属系统", "归属接口");
+    Project other = projects.save(new Project("另一个系统", "业务系统", "负责人", null, null, null, "RUNNING"));
+    var plan = policyService.create(request("归属计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> policyService.updateAsset(fixture.asset().getId(),
+        "归属接口", other.getName(), "生产", "HTTP", fixture.asset().getEndpoint(), "UNKNOWN"))
+        .isInstanceOf(IllegalStateException.class);
+    policyService.update(plan.id(), request("归属计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> policyService.updateAsset(fixture.asset().getId(),
+        "归属接口", other.getName(), "生产", "HTTP", fixture.asset().getEndpoint(), "UNKNOWN"))
+        .isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void 修改单服务后同计划其他绑定必须跟随版本且继续同步() {
+    Fixture fixture = fixture("多服务版本系统", "首个接口");
+    Asset second = assets.save(new Asset("第二接口", fixture.project().getName(), "生产", "HTTP",
+        "https://second.example.com/health", "UNKNOWN"));
+    var plan = policyService.create(request("多服务计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId(), second.getId())));
+    policyService.updateAsset(fixture.asset().getId(), "修改后的接口", fixture.project().getName(), "生产",
+        "HTTP", fixture.asset().getEndpoint(), "UNKNOWN");
+    Long version = plans.findById(plan.id()).orElseThrow().getDesiredVersion();
+    assertThat(bindings.findByPlanIdOrderById(plan.id())).allSatisfy(binding ->
+        assertThat(binding.getDesiredVersion()).isEqualTo(version));
+    assertThat(tasks.findByPlanIdOrderByCreatedAt(plan.id()).stream()
+        .filter(task -> task.getDesiredVersion().equals(version)).toList())
+        .hasSize(2).allSatisfy(task -> assertThat(task.getStatus()).isEqualTo("SUCCEEDED"));
+  }
+
+  @Test
   void 服务资料变化应递增计划版本并生成新任务() {
     Fixture fixture = fixture("服务版本系统", "服务版本接口");
     InspectionPlanPolicyService.InspectionPlanView created = policyService.create(request(

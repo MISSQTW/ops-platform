@@ -21,5 +21,6 @@ public interface InspectionPlanBindingRepository extends JpaRepository<Inspectio
   List<InspectionPlanBinding> findActiveHistoryForUpdate(Long assetId);
   Optional<InspectionPlanBinding> findByActiveOwnerKey(Long activeOwnerKey);
   boolean existsByPlanIdAndOwnershipStatusNot(Long planId, String ownershipStatus);
+  boolean existsByAssetIdAndOwnershipStatusNot(Long assetId, String ownershipStatus);
   void deleteByPlanId(Long planId);
 }
