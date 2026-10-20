@@ -2,8 +2,8 @@
 epic: ../epics/inspection-policy-hertzbeat-loop.md
 phase: executing
 approved_revision: dc3ee008133559e332fa9bfbab9366fd5f68bcd31f907a61152b15408853b1a8
-current_item: ITEM-4
-next_action: 切换巡检执行语义，仅在 Monitor 与规则同步完成后停止本地周期检查并保留地址测试
+current_item: ITEM-5
+next_action: 完善告警双状态处置、重开语义、归属快照与筛选详情接口
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -13,7 +13,7 @@ remote_publish: manual
 - [x] ITEM-1
 - [x] ITEM-2
 - [x] ITEM-3
-- [ ] ITEM-4
+- [x] ITEM-4
 - [ ] ITEM-5
 - [ ] ITEM-6
 - [ ] ITEM-7
@@ -76,3 +76,6 @@ remote_publish: manual
 - ITEM-3 新阶段首轮修复：计划实体增加 `@Version`，V3 补 `version` 列，计划更新/删除/迁移认领/任务处理使用计划悲观锁；并发计划更新串行递增期望版本，乐观冲突统一映射 409；自动入队在计划锁内 `saveAndFlush`；阶段成功不再推进整体 `lastVerifiedAt`，仅双资源全部达到目标后更新。
 - ITEM-3 新阶段首轮修复验证：新增并发计划更新测试和部分失败验证时间不前移断言；`InspectionPlanMonitoringSyncTest` 18 项、完整 103 项后端测试通过。更新后的 V3 在临时 PostgreSQL 库成功增加计划 `version` 列、清理重复任务并建立唯一索引；`git diff --check` 通过。
 - ITEM-3 新独立审查阶段第二轮：同 lineage reviewer Nietzsche 审查 staged SHA-256 `c8cf200b5f21c9aa38d448c55b1adf1eff4431b0efab1e65e3faacd5e63c9f08`，确认计划并发、旧写回、事务内入队和 `lastVerifiedAt` 四项 findings 全部 resolved，无新增 blocking、important 或 nit；ITEM-3 gate 通过。
+- ITEM-4 实现：服务 binding 仅在当前期望版本、所有权有效且 Monitor/告警规则均实际启用并具备外部 ID 时切换到 HertzBeat；同步失败、部分成功或计划版本漂移继续本地周期检查。新监控计划立即进入兜底调度，本地扫描默认 10 秒并支持秒级计划续跑；全部服务完成切换后仅推进计划时间，不再生成正式巡检记录。
+- ITEM-4 地址测试：新增 `POST /api/assets/{id}/test-address`，复用 HTTP/TCP 检查器返回即时结果，不保存巡检记录、不产生告警、不写入资产状态；旧巡检计划及既有历史记录结构保持兼容。
+- ITEM-4 验证与 change review：新增同步完成跳过、同步失败兜底、期望版本漂移兜底、地址测试不覆盖 HertzBeat 状态、首次到期、秒级续跑和 10 秒扫描配置测试；沙箱外完整 111 项后端测试通过，`git diff --cached --check` 通过。fresh reviewer Carson 三轮审查 staged SHA-256 `38bc01d75eb0bae352b716f51ebbe95224b155a0ba2bc52567a41a8f5a01602c`，确认首次调度、秒级续跑和最小扫描周期 findings 全部 resolved，无新增 blocking、important 或 nit；ITEM-4 gate 通过。

@@ -6,6 +6,8 @@ import com.lqbz.ops.domain.Inspection;
 import com.lqbz.ops.domain.InspectionItem;
 import com.lqbz.ops.domain.InspectionItemRepository;
 import com.lqbz.ops.domain.InspectionPlan;
+import com.lqbz.ops.domain.InspectionPlanBinding;
+import com.lqbz.ops.domain.InspectionPlanBindingRepository;
 import com.lqbz.ops.domain.InspectionPlanRepository;
 import com.lqbz.ops.domain.InspectionRepository;
 import java.net.HttpURLConnection;
@@ -17,7 +19,10 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,30 +33,35 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class InspectionExecutionService {
   private static final int CONNECT_TIMEOUT_MILLIS = 3000;
-  private static final Pattern INTERVAL_PATTERN = Pattern.compile("每\\s*(\\d+)\\s*(分钟|小时)");
+  private static final Pattern INTERVAL_PATTERN = Pattern.compile("每\\s*(\\d+)\\s*(秒|分钟|小时)");
 
   private final InspectionPlanRepository plans;
   private final AssetRepository assets;
   private final InspectionRepository inspections;
   private final InspectionItemRepository inspectionItems;
+  private final InspectionPlanBindingRepository bindings;
 
   public InspectionExecutionService(InspectionPlanRepository plans, AssetRepository assets,
-      InspectionRepository inspections, InspectionItemRepository inspectionItems) {
+      InspectionRepository inspections, InspectionItemRepository inspectionItems,
+      InspectionPlanBindingRepository bindings) {
     this.plans = plans;
     this.assets = assets;
     this.inspections = inspections;
     this.inspectionItems = inspectionItems;
+    this.bindings = bindings;
   }
 
   @Transactional
   public Inspection execute(Long planId) {
     InspectionPlan plan = plans.findById(planId)
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    return execute(plan, false);
+    Inspection inspection = execute(plan, false);
+    if (inspection == null) throw new IllegalStateException("计划内服务已由 HertzBeat 执行周期巡检，请使用地址测试");
+    return inspection;
   }
 
   @Scheduled(initialDelayString = "${ops.inspection.scheduler-initial-delay-ms:10000}",
-      fixedDelayString = "${ops.inspection.scheduler-delay-ms:30000}")
+      fixedDelayString = "${ops.inspection.scheduler-delay-ms:10000}")
   @Transactional
   public void executeDuePlans() {
     LocalDateTime now = LocalDateTime.now();
@@ -62,9 +72,13 @@ public class InspectionExecutionService {
 
   private Inspection execute(InspectionPlan plan, boolean scheduled) {
     long startedAt = System.nanoTime();
-    List<Asset> projectAssets = assets.findByProjectNameOrderById(plan.getProjectName());
-    List<CheckResult> results = projectAssets.stream().map(this::check).toList();
-    int passedChecks = (int) results.stream().filter(CheckResult::passed).count();
+    List<Asset> projectAssets = localExecutionAssets(plan);
+    if (plan.isMonitoringPolicy() && projectAssets.isEmpty()) {
+      if (scheduled) plan.scheduleNextRun(calculateNextRun(plan.getScheduleText(), LocalDateTime.now()));
+      return null;
+    }
+    List<AddressTestResult> results = projectAssets.stream().map(this::testAddress).toList();
+    int passedChecks = (int) results.stream().filter(AddressTestResult::passed).count();
     String status = !results.isEmpty() && passedChecks == results.size() ? "PASSED" : "FAILED";
     long durationSeconds = Math.max(1, Duration.ofNanos(System.nanoTime() - startedAt).toSeconds());
     Inspection inspection = inspections.save(new Inspection(plan.getName(), plan.getProjectName(), status,
@@ -72,7 +86,7 @@ public class InspectionExecutionService {
 
     for (int index = 0; index < projectAssets.size(); index++) {
       Asset asset = projectAssets.get(index);
-      CheckResult result = results.get(index);
+      AddressTestResult result = results.get(index);
       asset.applyInspectionStatus(result.passed() ? "HEALTHY" : "CRITICAL");
       inspectionItems.save(new InspectionItem(inspection.getId(), asset.getType(), asset.getName(),
           checkName(asset), result.passed() ? "PASSED" : "FAILED", result.message(), result.durationMillis()));
@@ -82,15 +96,36 @@ public class InspectionExecutionService {
     return inspection;
   }
 
-  private CheckResult check(Asset asset) {
+  private List<Asset> localExecutionAssets(InspectionPlan plan) {
+    List<Asset> projectAssets = assets.findByProjectNameOrderById(plan.getProjectName());
+    if (!plan.isMonitoringPolicy()) return projectAssets;
+    Map<Long, InspectionPlanBinding> planBindings = bindings.findByPlanIdOrderById(plan.getId()).stream()
+        .filter(binding -> !"RELEASED".equals(binding.getOwnershipStatus()))
+        .collect(Collectors.toMap(InspectionPlanBinding::getAssetId, Function.identity(), (left, right) -> right));
+    return projectAssets.stream()
+        .filter(asset -> {
+          InspectionPlanBinding binding = planBindings.get(asset.getId());
+          return binding != null && !binding.isHertzBeatReady(plan.getDesiredVersion());
+        })
+        .toList();
+  }
+
+  public AddressTestResult testAddress(Asset asset) {
     long startedAt = System.nanoTime();
     try {
       String message = "HTTP".equalsIgnoreCase(asset.getType()) ? checkHttp(asset.getEndpoint()) : checkTcp(asset);
-      return new CheckResult(true, message, elapsedMillis(startedAt));
+      return new AddressTestResult(true, message, elapsedMillis(startedAt));
     } catch (Exception exception) {
       String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-      return new CheckResult(false, checkName(asset) + "失败：" + detail, elapsedMillis(startedAt));
+      return new AddressTestResult(false, checkName(asset) + "失败：" + detail, elapsedMillis(startedAt));
     }
+  }
+
+  @Transactional(readOnly = true)
+  public AddressTestResult testAddress(Long assetId) {
+    Asset asset = assets.findById(assetId)
+        .orElseThrow(() -> new NoSuchElementException("服务不存在"));
+    return testAddress(asset);
   }
 
   private String checkHttp(String endpoint) throws Exception {
@@ -147,7 +182,11 @@ public class InspectionExecutionService {
     Matcher interval = INTERVAL_PATTERN.matcher(scheduleText);
     if (interval.matches()) {
       long value = Long.parseLong(interval.group(1));
-      return "分钟".equals(interval.group(2)) ? now.plusMinutes(value) : now.plusHours(value);
+      return switch (interval.group(2)) {
+        case "秒" -> now.plusSeconds(value);
+        case "分钟" -> now.plusMinutes(value);
+        default -> now.plusHours(value);
+      };
     }
     if ("每小时整点".equals(scheduleText)) return now.plusHours(1).truncatedTo(ChronoUnit.HOURS);
     if (scheduleText.startsWith("每天 ")) {
@@ -162,6 +201,6 @@ public class InspectionExecutionService {
     return now.plusHours(1);
   }
 
-  private record CheckResult(boolean passed, String message, long durationMillis) {}
+  public record AddressTestResult(boolean passed, String message, long durationMillis) {}
   private record HostPort(String host, int port) {}
 }

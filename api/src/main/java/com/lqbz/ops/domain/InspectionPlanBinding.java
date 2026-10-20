@@ -184,6 +184,18 @@ public class InspectionPlanBinding {
     releaseOwnership();
   }
 
+  public boolean isHertzBeatReady(long currentDesiredVersion) {
+    return "OWNED".equals(ownershipStatus)
+        && Long.valueOf(currentDesiredVersion).equals(desiredVersion)
+        && "ENABLED".equals(monitorDesiredState)
+        && "ENABLED".equals(monitorActualState)
+        && "ENABLED".equals(ruleDesiredState)
+        && "ENABLED".equals(ruleActualState)
+        && hertzbeatMonitorId != null
+        && hertzbeatAlertRuleId != null
+        && syncError == null;
+  }
+
   public Long getId() { return id; }
   public Long getPlanId() { return planId; }
   public Long getAssetId() { return assetId; }

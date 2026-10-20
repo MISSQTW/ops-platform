@@ -46,7 +46,8 @@ public class InspectionPlan {
 
   public static InspectionPlan monitoring(String name, Long projectId, String projectName, int intervalSeconds,
       int failureThreshold, String alertLevel) {
-    InspectionPlan plan = new InspectionPlan(name, projectName, "", "每 " + intervalSeconds + " 秒", "ENABLED", null);
+    InspectionPlan plan = new InspectionPlan(
+        name, projectName, "", "每 " + intervalSeconds + " 秒", "ENABLED", LocalDateTime.now());
     plan.projectId = projectId;
     plan.intervalSeconds = intervalSeconds;
     plan.failureThreshold = failureThreshold;

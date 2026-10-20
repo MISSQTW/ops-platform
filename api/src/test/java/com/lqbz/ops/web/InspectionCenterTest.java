@@ -106,4 +106,18 @@ class InspectionCenterTest {
     mockMvc.perform(get("/api/audits"))
         .andExpect(jsonPath("$[*].action", hasItem("EXECUTE_INSPECTION_PLAN")));
   }
+
+  @Test
+  void 应支持单服务地址测试() throws Exception {
+    MvcResult assets = mockMvc.perform(get("/api/assets"))
+        .andExpect(status().isOk())
+        .andReturn();
+    long assetId = objectMapper.readTree(assets.getResponse().getContentAsString()).get(0).get("id").asLong();
+
+    mockMvc.perform(post("/api/assets/{id}/test-address", assetId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.passed").isBoolean())
+        .andExpect(jsonPath("$.message").isString())
+        .andExpect(jsonPath("$.durationMillis").isNumber());
+  }
 }

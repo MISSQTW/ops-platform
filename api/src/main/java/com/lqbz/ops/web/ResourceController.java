@@ -212,6 +212,11 @@ public class ResourceController {
     return inspection;
   }
 
+  @PostMapping("/assets/{id}/test-address")
+  public InspectionExecutionService.AddressTestResult testAssetAddress(@PathVariable Long id) {
+    return inspectionExecutionService.testAddress(id);
+  }
+
   @PutMapping("/assets/{id}")
   public Asset updateAsset(@PathVariable Long id, @Valid @RequestBody AssetRequest request) {
     Asset asset = inspectionPlanPolicyService.updateAsset(id, request.name(), request.projectName(),
