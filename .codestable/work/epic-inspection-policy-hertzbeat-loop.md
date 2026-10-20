@@ -2,8 +2,8 @@
 epic: ../epics/inspection-policy-hertzbeat-loop.md
 phase: executing
 approved_revision: dc3ee008133559e332fa9bfbab9366fd5f68bcd31f907a61152b15408853b1a8
-current_item: ITEM-3
-next_action: 实现巡检计划驱动的版本化同步任务、自动同步、手动补偿同步和周期 reconciliation
+current_item: ITEM-4
+next_action: 切换巡检执行语义，仅在 Monitor 与规则同步完成后停止本地周期检查并保留地址测试
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -12,7 +12,7 @@ remote_publish: manual
 ## 子项进度
 - [x] ITEM-1
 - [x] ITEM-2
-- [ ] ITEM-3
+- [x] ITEM-3
 - [ ] ITEM-4
 - [ ] ITEM-5
 - [ ] ITEM-6
@@ -58,3 +58,21 @@ remote_publish: manual
 - ITEM-2 第二轮修复：受管规则查询遍历 HertzBeat 分页，并对缺少 `content` 的异常响应失败关闭；`monitorStatus()` 复用 `getMonitorDetails`，统一 HTTP 404、业务码 3 和 not-exist 文本的外部删除语义。新增第二页规则复用 PUT 和纯业务码 3 状态查询测试。
 - ITEM-2 第二轮修复后验证：沙箱外 `mvn -q -Dtest=HertzBeatClientTest test` 20 项通过；沙箱外完整 `mvn -q test` 退出码 0；`git diff --check` 通过。
 - ITEM-2 第三轮 change review：同 lineage reviewer Godel 审查 staged SHA-256 `50f2e429d1468a0a4aa8f50f2efe2a2977baad8519ae9c7931b27deb6ada147f`，确认分页查重、异常响应失败关闭和 Monitor 删除语义全部 resolved，无新增 blocking、important 或 nit；ITEM-2 gate 通过。
+- ITEM-3 TDD：新增计划保存提交后自动同步、单服务失败不回滚其他服务、手动补偿、旧版本任务作废、外部漂移读取后修复、删除成功后释放 binding、崩溃 RUNNING 任务恢复和外部规则删除后重建测试；首轮因编排服务与任务查询缺失编译失败，补实现后 8 项定向测试通过。
+- ITEM-3 实现：计划创建、更新、启停、移除服务、逻辑删除和迁移认领均写入版本化持久任务，并在事务提交后自动执行；新增单计划/全部计划手动同步接口、30 秒周期 reconciliation、指数退避重试、超时 RUNNING 恢复、旧版本作废、binding 悲观锁串行化、Monitor/规则先读后修和删除补偿。
+- ITEM-3 兼容调整：自动同步成功后待释放 binding 会立即保留为 `RELEASED` 历史记录，既有 API 测试改为同时断言历史释放记录与新 `OWNED` 当前记录，不再假设保存后尚未执行外部清理。
+- ITEM-3 当前验证：`InspectionPlanMonitoringSyncTest` 8 项通过；`InspectionPlanMonitoringSyncTest,InspectionPlanPolicyApiTest,InspectionPolicyModelTest,MonitoringPolicyMigrationServiceTest` 相关回归通过；沙箱外完整 `mvn -q test` 退出码 0；`git diff --check` 通过。
+- ITEM-3 首轮 change review：fresh reviewer Ptolemy 审查 staged SHA-256 `ec87db62d5e1ff7b037abe9d2bda127696d8f5fa2ddab780501402ff02e08169`，指出停用后未释放与重启未原子抢占、批量任务同事务、服务资料未进入版本链三个 blocking，以及实际配置未比较/写后验证、任务缺数据库防重、删除未进入 `DELETED` 三个 important。
+- ITEM-3 首轮修复：停用同步成功后 binding 转为 `DISABLED_RELEASED` 并释放 active owner，重新启用先检查全部冲突再统一获取所有权；任务通过 self proxy 使用 `REQUIRES_NEW` 独立提交；服务更新锁定关联 binding、递增计划期望版本并自动生成任务；Monitor/规则按真实字段比较，漂移时下发且 Monitor 写后回读验证；任务增加四字段数据库唯一约束并复用同版本任务；删除完成后计划进入 `DELETED`。
+- ITEM-3 首轮修复测试：新增停用释放与重启冲突、服务资料版本、同版本任务防重和删除终态断言；测试桩按下发参数回显真实配置，确保写后验证不是形式断言。`InspectionPlanMonitoringSyncTest` 11 项、相关计划/模型/迁移回归及完整 `mvn -q test` 均通过，`git diff --check` 通过。
+- ITEM-3 第二轮 change review：同 lineage reviewer Ptolemy 审查 staged SHA-256 `721fe0be8cc5c6a1983a94ed4f27545a6ef2e8f328fdf110323f7cef5b7a7d89`，确认独立事务、任务防重和删除终态 resolved；指出停用释放后旧计划仍参与 reconciliation、服务更新与任务执行锁顺序相反两个 blocking，以及 Monitor/规则部分成功状态被统一覆盖一个 important。
+- ITEM-3 第二轮修复：`DISABLED_RELEASED` binding 不再自动或手动入队，避免与新 owner 争抢外部配置；服务更新收敛到策略服务，先锁 binding 再读取/修改 asset，与任务执行统一 `binding -> asset` 顺序；Monitor 与规则同步和删除按阶段分别写入实际状态，后续资源失败不再抹掉前序资源成功事实。
+- ITEM-3 第二轮修复测试：新增新计划接管后旧停用计划 reconciliation 不下发禁用配置、Monitor 一致但规则失败、规则删除成功但 Monitor 删除失败三项测试。`InspectionPlanMonitoringSyncTest` 14 项和完整 `mvn -q test` 通过；`git diff --check` 通过。
+- ITEM-3 PostgreSQL V3 验证：临时库 `ops_platform_v3_check_20261020` 执行 V2 后插入两条相同目标任务，V3 成功删除 1 条重复记录并建立 `uk_ops_monitoring_task_target` 唯一索引。
+- ITEM-3 第三轮 change review：同 lineage reviewer Ptolemy 审查 staged SHA-256 `9196d7980f3ff96651030f74876c4dcc98a2ba5d41201ce121102d5b0e02ea1b`；分阶段状态 resolved，但事务内入队仍包含 `DISABLED_RELEASED`、控制器在 binding 锁前预读 asset 两项未完全解决，并新增旧计划清理可能删除新 owner 共享 Monitor 的 blocking。原审查阶段达到三轮上限。
+- ITEM-3 三轮后修复：策略事务入队和服务资料变更均跳过 `DISABLED_RELEASED`；服务更新默认值解析移入 binding 锁之后且控制器取消外层事务与预读；失去所有权的旧 binding 移除/删除时 Monitor 目标改为 `DETACHED`，只清理旧计划专属规则，不删除或解绑新 owner 共用 Monitor。
+- ITEM-3 三轮后测试：新增服务资料变化后旧停用计划不下发、接管后删除旧计划不删 Monitor、接管后从旧计划移除服务不删 Monitor；`InspectionPlanMonitoringSyncTest` 17 项和完整 `mvn -q test` 通过，`git diff --check` 通过。沿用 owner 在 ITEM-1 同类三轮上限时确认的方案 2，开启新的独立 change review 阶段。
+- ITEM-3 新独立审查阶段首轮：fresh reviewer Nietzsche 审查 staged SHA-256 `10a6fff82babb21ed478a3b6bb803e3b010caf81a109d5a8f9b934a4199aac01`，确认三轮后共享 Monitor、锁前快照和旧计划入队修复方向正确；新增计划缺并发控制、任务使用旧计划实体更新汇总两个 blocking，以及事务内入队提交期冲突和部分成功推进整体 `lastVerifiedAt` 两个 important。
+- ITEM-3 新阶段首轮修复：计划实体增加 `@Version`，V3 补 `version` 列，计划更新/删除/迁移认领/任务处理使用计划悲观锁；并发计划更新串行递增期望版本，乐观冲突统一映射 409；自动入队在计划锁内 `saveAndFlush`；阶段成功不再推进整体 `lastVerifiedAt`，仅双资源全部达到目标后更新。
+- ITEM-3 新阶段首轮修复验证：新增并发计划更新测试和部分失败验证时间不前移断言；`InspectionPlanMonitoringSyncTest` 18 项、完整 103 项后端测试通过。更新后的 V3 在临时 PostgreSQL 库成功增加计划 `version` 列、清理重复任务并建立唯一索引；`git diff --check` 通过。
+- ITEM-3 新独立审查阶段第二轮：同 lineage reviewer Nietzsche 审查 staged SHA-256 `c8cf200b5f21c9aa38d448c55b1adf1eff4431b0efab1e65e3faacd5e63c9f08`，确认计划并发、旧写回、事务内入队和 `lastVerifiedAt` 四项 findings 全部 resolved，无新增 blocking、important 或 nit；ITEM-3 gate 通过。

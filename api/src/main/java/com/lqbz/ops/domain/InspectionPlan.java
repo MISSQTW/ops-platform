@@ -6,12 +6,15 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "ops_inspection_plan")
 public class InspectionPlan {
   @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+  @Version
+  private Long version;
   private String name;
   private Long projectId;
   private String projectName;
@@ -108,5 +111,32 @@ public class InspectionPlan {
 
   public boolean isMonitoringPolicy() {
     return projectId != null && intervalSeconds != null;
+  }
+
+  public void markSyncing(LocalDateTime now) {
+    this.syncStatus = "SYNCING";
+    this.lastSyncAttemptAt = now;
+    this.syncError = null;
+  }
+
+  public void updateSyncSummary(String syncStatus, LocalDateTime now, String error) {
+    this.syncStatus = syncStatus;
+    this.lastSyncAttemptAt = now;
+    this.syncError = error;
+    if ("SYNCED".equals(syncStatus)) {
+      this.lastSyncSucceededAt = now;
+      this.lastVerifiedAt = now;
+    }
+  }
+
+  public void touchDesiredVersion() {
+    this.desiredVersion = getDesiredVersion() + 1;
+    this.syncStatus = "NOT_SYNCED";
+    this.syncError = null;
+  }
+
+  public void markDeleted(LocalDateTime now) {
+    this.lifecycleStatus = "DELETED";
+    updateSyncSummary("SYNCED", now, null);
   }
 }

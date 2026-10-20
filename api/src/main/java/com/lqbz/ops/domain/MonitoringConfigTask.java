@@ -9,7 +9,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
 @Entity
-@Table(name = "ops_monitoring_config_task")
+@Table(name = "ops_monitoring_config_task", uniqueConstraints = @jakarta.persistence.UniqueConstraint(
+    name = "uk_ops_monitoring_task_target", columnNames = {"planId", "assetId", "desiredVersion", "operation"}))
 public class MonitoringConfigTask {
   @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
@@ -53,6 +54,34 @@ public class MonitoringConfigTask {
     status = "RETRY";
     this.nextAttemptAt = nextAttemptAt;
     this.errorMessage = errorMessage;
+  }
+
+  public void succeed(LocalDateTime now) {
+    status = "SUCCEEDED";
+    finishedAt = now;
+    errorMessage = null;
+  }
+
+  public void obsolete(LocalDateTime now) {
+    status = "OBSOLETE";
+    finishedAt = now;
+    errorMessage = null;
+  }
+
+  public void recover(LocalDateTime now) {
+    if (!"RUNNING".equals(status)) return;
+    status = "RETRY";
+    nextAttemptAt = now;
+    errorMessage = "同步进程中断，任务已恢复";
+  }
+
+  public void reschedule(LocalDateTime now) {
+    if ("RUNNING".equals(status) || "PENDING".equals(status) || "RETRY".equals(status)) return;
+    status = "PENDING";
+    nextAttemptAt = now;
+    startedAt = null;
+    finishedAt = null;
+    errorMessage = null;
   }
 
   public Long getId() { return id; }

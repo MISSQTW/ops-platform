@@ -5,6 +5,7 @@ import java.util.NoSuchElementException;
 import com.lqbz.ops.domain.*;
 import com.lqbz.ops.service.InspectionExecutionService;
 import com.lqbz.ops.service.InspectionPlanPolicyService;
+import com.lqbz.ops.service.InspectionPlanMonitoringSyncService;
 import com.lqbz.ops.service.MonitoringPolicyMigrationService;
 import com.lqbz.ops.integration.MonitoringCleanupService;
 import jakarta.validation.Valid;
@@ -37,13 +38,15 @@ public class ResourceController {
   private final InspectionPlanPolicyService inspectionPlanPolicyService;
   private final MonitoringPolicyMigrationService monitoringPolicyMigrationService;
   private final InspectionPlanBindingRepository inspectionPlanBindings;
+  private final InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService;
 
   public ResourceController(ProjectRepository projects, AssetRepository assets, InspectionRepository inspections,
       AlertRepository alerts, AuditLogRepository audits, InspectionPlanRepository inspectionPlans,
       InspectionItemRepository inspectionItems, InspectionExecutionService inspectionExecutionService,
       MonitoringCleanupService monitoringCleanupService, InspectionPlanPolicyService inspectionPlanPolicyService,
       MonitoringPolicyMigrationService monitoringPolicyMigrationService,
-      InspectionPlanBindingRepository inspectionPlanBindings) {
+      InspectionPlanBindingRepository inspectionPlanBindings,
+      InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService) {
     this.projects = projects;
     this.assets = assets;
     this.inspections = inspections;
@@ -56,6 +59,7 @@ public class ResourceController {
     this.inspectionPlanPolicyService = inspectionPlanPolicyService;
     this.monitoringPolicyMigrationService = monitoringPolicyMigrationService;
     this.inspectionPlanBindings = inspectionPlanBindings;
+    this.inspectionPlanMonitoringSyncService = inspectionPlanMonitoringSyncService;
   }
 
   @GetMapping("/projects") public List<Project> projects() { return projects.findAll(Sort.by("id")); }
@@ -184,6 +188,16 @@ public class ResourceController {
     return inspectionPlanPolicyService.requestDelete(id);
   }
 
+  @PostMapping("/monitoring-plans/{id}/sync")
+  public InspectionPlanMonitoringSyncService.SyncSummary syncMonitoringPlan(@PathVariable Long id) {
+    return inspectionPlanMonitoringSyncService.syncPlan(id);
+  }
+
+  @PostMapping("/monitoring-plans/sync-all")
+  public InspectionPlanMonitoringSyncService.SyncAllSummary syncAllMonitoringPlans() {
+    return inspectionPlanMonitoringSyncService.syncAllPlans();
+  }
+
   @PostMapping("/inspection-plans/migration-claims")
   public InspectionPlanPolicyService.MigrationBatchResult claimInspectionPlanMigration(
       @RequestBody List<InspectionPlanPolicyService.MigrationClaim> claims) {
@@ -199,11 +213,9 @@ public class ResourceController {
   }
 
   @PutMapping("/assets/{id}")
-  @Transactional
   public Asset updateAsset(@PathVariable Long id, @Valid @RequestBody AssetRequest request) {
-    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
-    asset.update(request.name(), request.projectName(), valueOr(request.environmentName(), asset.getEnvironmentName()),
-        request.type(), request.endpoint(), valueOr(request.status(), asset.getStatus()));
+    Asset asset = inspectionPlanPolicyService.updateAsset(id, request.name(), request.projectName(),
+        request.environmentName(), request.type(), request.endpoint(), request.status());
     audits.save(new AuditLog("UPDATE_ASSET", "ASSET", asset.getName()));
     return asset;
   }

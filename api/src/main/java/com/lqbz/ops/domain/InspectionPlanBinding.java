@@ -52,7 +52,7 @@ public class InspectionPlanBinding {
   }
 
   public void alignWithPlanStatus(String planStatus, long desiredVersion) {
-    if (!"OWNED".equals(ownershipStatus)) return;
+    if (!"OWNED".equals(ownershipStatus) && !"DISABLED_RELEASED".equals(ownershipStatus)) return;
     this.desiredVersion = desiredVersion;
     String desiredState = "ENABLED".equals(planStatus) ? "ENABLED" : "DISABLED";
     this.monitorDesiredState = desiredState;
@@ -70,7 +70,7 @@ public class InspectionPlanBinding {
   public void requestRelease(long desiredVersion) {
     this.desiredVersion = desiredVersion;
     this.ownershipStatus = "PENDING_RELEASE";
-    this.monitorDesiredState = "DELETED";
+    this.monitorDesiredState = activeOwnerKey == null ? "DETACHED" : "DELETED";
     this.ruleDesiredState = "DELETED";
   }
 
@@ -85,6 +85,103 @@ public class InspectionPlanBinding {
   public void releaseOwnership() {
     this.ownershipStatus = "RELEASED";
     this.activeOwnerKey = null;
+  }
+
+  public void releaseDisabledOwnership() {
+    if (!"OWNED".equals(ownershipStatus)) return;
+    this.ownershipStatus = "DISABLED_RELEASED";
+    this.activeOwnerKey = null;
+  }
+
+  public void reacquireOwnership(long desiredVersion) {
+    if (!"DISABLED_RELEASED".equals(ownershipStatus)) throw new IllegalStateException("只有已停用释放的绑定可以重新获取所有权");
+    this.desiredVersion = desiredVersion;
+    this.ownershipStatus = "OWNED";
+    this.activeOwnerKey = assetId;
+    this.monitorDesiredState = "ENABLED";
+    this.ruleDesiredState = "ENABLED";
+  }
+
+  public void markSyncing(LocalDateTime now) {
+    this.lastSyncAttemptAt = now;
+    this.syncError = null;
+  }
+
+  public void markSynchronized(Long monitorId, Long alertRuleId, boolean enabled, LocalDateTime now) {
+    this.hertzbeatMonitorId = monitorId;
+    this.hertzbeatAlertRuleId = alertRuleId;
+    this.monitorActualState = enabled ? "ENABLED" : "DISABLED";
+    this.ruleActualState = enabled ? "ENABLED" : "DISABLED";
+    this.lastSyncSucceededAt = now;
+    this.lastVerifiedAt = now;
+    this.syncError = null;
+  }
+
+  public void markSyncFailed(String message, LocalDateTime now) {
+    this.monitorActualState = "FAILED";
+    this.ruleActualState = "FAILED";
+    this.lastSyncAttemptAt = now;
+    this.syncError = message;
+  }
+
+  public void markMonitorSynchronized(Long monitorId, boolean enabled, LocalDateTime now) {
+    this.hertzbeatMonitorId = monitorId;
+    this.monitorActualState = enabled ? "ENABLED" : "DISABLED";
+  }
+
+  public void markRuleSynchronized(Long alertRuleId, boolean enabled, LocalDateTime now) {
+    this.hertzbeatAlertRuleId = alertRuleId;
+    this.ruleActualState = enabled ? "ENABLED" : "DISABLED";
+  }
+
+  public void markMonitorFailed(String message, LocalDateTime now) {
+    this.monitorActualState = "FAILED";
+    this.lastSyncAttemptAt = now;
+    this.syncError = message;
+  }
+
+  public void markRuleFailed(String message, LocalDateTime now) {
+    this.ruleActualState = "FAILED";
+    this.lastSyncAttemptAt = now;
+    this.syncError = message;
+  }
+
+  public void markRuleDeleted(LocalDateTime now) {
+    this.ruleActualState = "DELETED";
+    this.hertzbeatAlertRuleId = null;
+  }
+
+  public void markMonitorDeleted(LocalDateTime now) {
+    this.monitorActualState = "DELETED";
+    this.hertzbeatMonitorId = null;
+  }
+
+  public void markMonitorDetached(LocalDateTime now) {
+    this.monitorActualState = "DETACHED";
+    this.hertzbeatMonitorId = null;
+  }
+
+  public void completeRelease(LocalDateTime now) {
+    this.lastSyncSucceededAt = now;
+    this.lastVerifiedAt = now;
+    this.syncError = null;
+    releaseOwnership();
+  }
+
+  public void markSyncError(String message, LocalDateTime now) {
+    this.lastSyncAttemptAt = now;
+    this.syncError = message;
+  }
+
+  public void markDeleted(LocalDateTime now) {
+    this.monitorActualState = "DELETED";
+    this.ruleActualState = "DELETED";
+    this.hertzbeatMonitorId = null;
+    this.hertzbeatAlertRuleId = null;
+    this.lastSyncSucceededAt = now;
+    this.lastVerifiedAt = now;
+    this.syncError = null;
+    releaseOwnership();
   }
 
   public Long getId() { return id; }

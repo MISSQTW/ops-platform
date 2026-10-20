@@ -6,6 +6,7 @@ import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.CannotSerializeTransactionException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -43,6 +44,12 @@ public class ApiExceptionHandler {
   @ExceptionHandler(CannotSerializeTransactionException.class)
   @ResponseStatus(HttpStatus.CONFLICT)
   public Map<String, Object> serializationConflict(CannotSerializeTransactionException exception) {
+    return Map.of("message", "数据正在被并发修改，请重试", "errors", List.of());
+  }
+
+  @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public Map<String, Object> optimisticConflict(ObjectOptimisticLockingFailureException exception) {
     return Map.of("message", "数据正在被并发修改，请重试", "errors", List.of());
   }
 

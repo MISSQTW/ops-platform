@@ -6,6 +6,7 @@ import com.lqbz.ops.domain.InspectionPlan;
 import com.lqbz.ops.domain.InspectionPlanBinding;
 import com.lqbz.ops.domain.InspectionPlanBindingRepository;
 import com.lqbz.ops.domain.InspectionPlanRepository;
+import com.lqbz.ops.domain.MonitoringConfigTaskRepository;
 import com.lqbz.ops.domain.Project;
 import com.lqbz.ops.domain.ProjectRepository;
 import com.lqbz.ops.web.InspectionPlanRequest;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.time.LocalDateTime;
 import org.springframework.data.domain.Sort;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,13 +24,18 @@ public class InspectionPlanPolicyService {
   private final AssetRepository assets;
   private final InspectionPlanRepository plans;
   private final InspectionPlanBindingRepository bindings;
+  private final MonitoringConfigTaskRepository tasks;
+  private final ApplicationEventPublisher events;
 
   public InspectionPlanPolicyService(ProjectRepository projects, AssetRepository assets,
-      InspectionPlanRepository plans, InspectionPlanBindingRepository bindings) {
+      InspectionPlanRepository plans, InspectionPlanBindingRepository bindings,
+      MonitoringConfigTaskRepository tasks, ApplicationEventPublisher events) {
     this.projects = projects;
     this.assets = assets;
     this.plans = plans;
     this.bindings = bindings;
+    this.tasks = tasks;
+    this.events = events;
   }
 
   @Transactional(readOnly = true)
@@ -64,12 +71,13 @@ public class InspectionPlanPolicyService {
       binding.alignWithPlanStatus(plan.getStatus(), plan.getDesiredVersion());
       bindings.save(binding);
     }
+    enqueueAndPublish(plan);
     return view(plan);
   }
 
   @Transactional
   public InspectionPlanView update(Long id, InspectionPlanRequest request) {
-    InspectionPlan plan = plans.findById(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
+    InspectionPlan plan = plans.findByIdForUpdate(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     if (!plan.isMonitoringPolicy()) throw new IllegalArgumentException("旧巡检计划不能使用监控策略接口修改");
     if (!"ACTIVE".equals(plan.getLifecycleStatus())) throw new IllegalStateException("删除中的巡检计划不能修改");
     Project project = projects.findById(request.projectId()).orElseThrow(() -> new NoSuchElementException("项目不存在"));
@@ -77,19 +85,35 @@ public class InspectionPlanPolicyService {
       throw new IllegalArgumentException("结构化巡检计划不能变更所属项目");
     }
     List<Long> assetIds = requireAssets(project, request.assetIds());
+    String requestedStatus = requireStatus(valueOr(request.status(), plan.getStatus()));
+    List<InspectionPlanBinding> existing = bindings.findByPlanIdOrderById(plan.getId());
+    if ("ENABLED".equals(requestedStatus) && "DISABLED".equals(plan.getStatus())) {
+      List<Long> conflicts = existing.stream()
+          .filter(binding -> assetIds.contains(binding.getAssetId()))
+          .filter(binding -> "DISABLED_RELEASED".equals(binding.getOwnershipStatus()))
+          .map(InspectionPlanBinding::getAssetId)
+          .filter(assetId -> bindings.findByActiveOwnerKey(assetId)
+              .filter(owner -> !owner.getPlanId().equals(plan.getId())).isPresent())
+          .toList();
+      if (!conflicts.isEmpty()) throw new IllegalStateException("服务已被其他启用计划接管：" + conflicts);
+    }
     plan.reconfigure(request.name(), require(request.intervalSeconds(), "巡检频率不能为空"),
         require(request.failureThreshold(), "连续失败次数不能为空"), require(request.alertLevel(), "告警级别不能为空"),
-        requireStatus(valueOr(request.status(), plan.getStatus())));
-    List<InspectionPlanBinding> existing = bindings.findByPlanIdOrderById(plan.getId());
+        requestedStatus);
     for (InspectionPlanBinding binding : existing) {
       if (!assetIds.contains(binding.getAssetId()) && !"RELEASED".equals(binding.getOwnershipStatus())) {
         binding.requestRelease(plan.getDesiredVersion());
       } else if (assetIds.contains(binding.getAssetId())) {
-        binding.alignWithPlanStatus(plan.getStatus(), plan.getDesiredVersion());
+        if ("ENABLED".equals(plan.getStatus()) && "DISABLED_RELEASED".equals(binding.getOwnershipStatus())) {
+          binding.reacquireOwnership(plan.getDesiredVersion());
+        } else {
+          binding.alignWithPlanStatus(plan.getStatus(), plan.getDesiredVersion());
+        }
       }
     }
     List<Long> existingAssetIds = existing.stream()
-        .filter(binding -> "OWNED".equals(binding.getOwnershipStatus()))
+        .filter(binding -> "OWNED".equals(binding.getOwnershipStatus())
+            || "DISABLED_RELEASED".equals(binding.getOwnershipStatus()))
         .map(InspectionPlanBinding::getAssetId)
         .toList();
     for (Long assetId : assetIds) {
@@ -107,17 +131,19 @@ public class InspectionPlanPolicyService {
         bindings.save(binding);
       }
     }
+    enqueueAndPublish(plan);
     return view(plan);
   }
 
   @Transactional
   public InspectionPlanView requestDelete(Long id) {
-    InspectionPlan plan = plans.findById(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
+    InspectionPlan plan = plans.findByIdForUpdate(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     if (!plan.isMonitoringPolicy()) throw new IllegalArgumentException("旧巡检计划不支持逻辑删除");
     plan.markDeleting();
     bindings.findByPlanIdOrderById(plan.getId()).stream()
         .filter(binding -> !"RELEASED".equals(binding.getOwnershipStatus()))
         .forEach(binding -> binding.requestRelease(plan.getDesiredVersion()));
+    enqueueAndPublish(plan);
     return view(plan);
   }
 
@@ -125,7 +151,8 @@ public class InspectionPlanPolicyService {
   public MigrationBatchResult claimExisting(List<MigrationClaim> claims) {
     int claimed = 0;
     for (MigrationClaim claim : claims) {
-      InspectionPlan plan = plans.findById(claim.planId()).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
+      InspectionPlan plan = plans.findByIdForUpdate(claim.planId())
+          .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
       Asset asset = assets.findById(claim.assetId()).orElseThrow(() -> new NoSuchElementException("服务不存在"));
       if (!plan.isMonitoringPolicy() || !asset.getProjectName().equals(plan.getProjectName())) {
         throw new IllegalArgumentException("迁移批次中的计划与服务不匹配");
@@ -142,9 +169,31 @@ public class InspectionPlanPolicyService {
       }
       bindings.save(InspectionPlanBinding.claimExisting(plan.getId(), asset.getId(), plan.getDesiredVersion(),
           asset.getHertzbeatMonitorId()));
+      enqueueAndPublish(plan);
       claimed++;
     }
     return new MigrationBatchResult(claimed, LocalDateTime.now());
+  }
+
+  @Transactional
+  public Asset updateAsset(Long assetId, String name, String projectName, String environmentName,
+      String type, String endpoint, String status) {
+    InspectionPlanBinding owner = bindings.findByActiveOwnerKey(assetId).orElse(null);
+    InspectionPlan lockedPlan = owner == null ? null : plans.findByIdForUpdate(owner.getPlanId()).orElse(null);
+    List<InspectionPlanBinding> affectedBindings = lockedPlan == null ? List.of()
+        : bindings.findCurrentForUpdate(lockedPlan.getId(), assetId).stream().toList();
+    Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("服务不存在"));
+    asset.update(name, projectName, valueOr(environmentName, asset.getEnvironmentName()), type, endpoint,
+        valueOr(status, asset.getStatus()));
+    for (InspectionPlanBinding binding : affectedBindings) {
+      if ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())) continue;
+      InspectionPlan plan = lockedPlan;
+      if (plan == null || !plan.isMonitoringPolicy() || !"ACTIVE".equals(plan.getLifecycleStatus())) continue;
+      plan.touchDesiredVersion();
+      binding.alignWithPlanStatus(plan.getStatus(), plan.getDesiredVersion());
+      enqueueAndPublish(plan);
+    }
+    return asset;
   }
 
   private List<Long> requireAssets(Project project, List<Long> requestedIds) {
@@ -176,7 +225,8 @@ public class InspectionPlanPolicyService {
 
   private InspectionPlanView view(InspectionPlan plan) {
     List<Long> assetIds = bindings.findByPlanIdOrderById(plan.getId()).stream()
-        .filter(binding -> "OWNED".equals(binding.getOwnershipStatus()))
+        .filter(binding -> "OWNED".equals(binding.getOwnershipStatus())
+            || "DISABLED_RELEASED".equals(binding.getOwnershipStatus()))
         .map(InspectionPlanBinding::getAssetId).toList();
     return new InspectionPlanView(plan.getId(), plan.getName(), plan.getProjectId(), plan.getProjectName(),
         plan.getScopeText(), plan.getScheduleText(), plan.getStatus(), plan.getNextRunAt(), plan.getIntervalSeconds(),
@@ -187,6 +237,21 @@ public class InspectionPlanPolicyService {
 
   private String valueOr(String value, String fallback) {
     return value == null || value.isBlank() ? fallback : value;
+  }
+
+  private void enqueueAndPublish(InspectionPlan plan) {
+    LocalDateTime now = LocalDateTime.now();
+    for (InspectionPlanBinding binding : bindings.findByPlanIdOrderById(plan.getId())) {
+      if ("RELEASED".equals(binding.getOwnershipStatus())
+          || "DISABLED_RELEASED".equals(binding.getOwnershipStatus())) continue;
+      String operation = "DELETED".equals(binding.getRuleDesiredState()) ? "DELETE" : "UPSERT";
+      if (tasks.findByPlanIdAndAssetIdAndDesiredVersionAndOperation(
+          plan.getId(), binding.getAssetId(), plan.getDesiredVersion(), operation).isEmpty()) {
+        tasks.saveAndFlush(new com.lqbz.ops.domain.MonitoringConfigTask(
+            plan.getId(), binding.getAssetId(), plan.getDesiredVersion(), operation, now));
+      }
+    }
+    events.publishEvent(new InspectionPlanSyncRequested(plan.getId()));
   }
 
   public record InspectionPlanView(Long id, String name, Long projectId, String projectName, String scopeText,

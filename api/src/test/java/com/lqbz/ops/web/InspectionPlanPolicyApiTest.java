@@ -110,7 +110,7 @@ class InspectionPlanPolicyApiTest {
 
     mockMvc.perform(get("/api/inspection-plans/{id}", planId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.lifecycleStatus").value("DELETING"));
+        .andExpect(jsonPath("$.lifecycleStatus").value("DELETED"));
   }
 
   @Test
@@ -128,9 +128,6 @@ class InspectionPlanPolicyApiTest {
     long planId = createMonitoringPlan("重绑计划", projectId, "重新绑定系统", List.of(retainedAssetId, reboundAssetId));
 
     updateMonitoringPlan(planId, projectId, "重新绑定系统", List.of(retainedAssetId));
-    InspectionPlanBinding released = bindings.findByActiveOwnerKey(reboundAssetId).orElseThrow();
-    released.releaseOwnership();
-    bindings.saveAndFlush(released);
 
     mockMvc.perform(put("/api/monitoring-plans/{id}", planId)
             .contentType(MediaType.APPLICATION_JSON)
@@ -184,7 +181,7 @@ class InspectionPlanPolicyApiTest {
     org.assertj.core.api.Assertions.assertThat(bindings.findByPlanIdOrderById(planId))
         .filteredOn(binding -> restoredAssetId == binding.getAssetId())
         .extracting(InspectionPlanBinding::getOwnershipStatus)
-        .containsExactly("OWNED");
+        .containsExactly("RELEASED", "OWNED");
   }
 
   @Test

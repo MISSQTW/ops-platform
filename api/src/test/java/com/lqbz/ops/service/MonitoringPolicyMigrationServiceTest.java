@@ -45,11 +45,13 @@ class MonitoringPolicyMigrationServiceTest {
     Asset asset = new Asset("订单接口", "订单系统", "生产", "HTTP", "https://example.com/health", "UNKNOWN");
     asset.markSynced(123L, "已同步");
     InspectionPlan plan = InspectionPlan.monitoring("订单巡检", 1L, "订单系统", 60, 2, "CRITICAL");
-    when(plans.findById(10L)).thenReturn(java.util.Optional.of(plan));
+    when(plans.findByIdForUpdate(10L)).thenReturn(java.util.Optional.of(plan));
     when(assets.findById(20L)).thenReturn(java.util.Optional.of(asset));
     when(assets.countByHertzbeatMonitorId(123L)).thenReturn(2L);
 
-    InspectionPlanPolicyService service = new InspectionPlanPolicyService(projects, assets, plans, bindings);
+    InspectionPlanPolicyService service = new InspectionPlanPolicyService(projects, assets, plans, bindings,
+        mock(com.lqbz.ops.domain.MonitoringConfigTaskRepository.class),
+        mock(org.springframework.context.ApplicationEventPublisher.class));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claimExisting(
         List.of(new InspectionPlanPolicyService.MigrationClaim(10L, 20L))))
@@ -67,10 +69,12 @@ class MonitoringPolicyMigrationServiceTest {
     asset.markSynced(456L, "已同步");
     InspectionPlan plan = InspectionPlan.monitoring("停用巡检", 1L, "支付系统", 60, 2, "CRITICAL");
     plan.configureStatus("DISABLED");
-    when(plans.findById(30L)).thenReturn(java.util.Optional.of(plan));
+    when(plans.findByIdForUpdate(30L)).thenReturn(java.util.Optional.of(plan));
     when(assets.findById(40L)).thenReturn(java.util.Optional.of(asset));
 
-    InspectionPlanPolicyService service = new InspectionPlanPolicyService(projects, assets, plans, bindings);
+    InspectionPlanPolicyService service = new InspectionPlanPolicyService(projects, assets, plans, bindings,
+        mock(com.lqbz.ops.domain.MonitoringConfigTaskRepository.class),
+        mock(org.springframework.context.ApplicationEventPublisher.class));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claimExisting(
         List.of(new InspectionPlanPolicyService.MigrationClaim(30L, 40L))))
