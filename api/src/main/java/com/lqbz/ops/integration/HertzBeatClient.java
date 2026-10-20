@@ -50,6 +50,11 @@ public class HertzBeatClient {
   }
 
   public SyncResult sync(Asset asset) throws Exception {
+    return syncMonitor(asset, 60, true);
+  }
+
+  public SyncResult syncMonitor(Asset asset, int intervalSeconds, boolean enabled) throws Exception {
+    if (intervalSeconds < 10) throw new IllegalArgumentException("HertzBeat 固定采集间隔不能小于 10 秒");
     String token = login();
     if (token.isBlank()) throw new IllegalStateException("HertzBeat 认证失败");
     MonitorTarget target = monitorTarget(asset);
@@ -64,9 +69,9 @@ public class HertzBeatClient {
     monitor.put("name", asset.getName());
     monitor.put("app", target.app());
     monitor.put("instance", target.instance());
-    monitor.put("intervals", 60);
+    monitor.put("intervals", intervalSeconds);
     monitor.put("scheduleType", "fixed");
-    monitor.put("status", 1);
+    monitor.put("status", enabled ? 1 : 0);
     monitor.put("type", 0);
     monitor.put("description", asset.getProjectName() + " / " + asset.getEnvironmentName());
     Map<String, String> labels = new LinkedHashMap<>();
@@ -95,9 +100,58 @@ public class HertzBeatClient {
     return new SyncResult(monitorId, "同步成功");
   }
 
+  public AlertRule upsertAlertRule(AlertRuleSpec spec) throws Exception {
+    if (spec.period() == null || spec.period() < 1) throw new IllegalArgumentException("告警执行周期必须大于 0 秒");
+    if (spec.times() == null || spec.times() < 1) throw new IllegalArgumentException("连续失败次数必须大于 0");
+    String token = login();
+    if (token.isBlank()) throw new IllegalStateException("HertzBeat 认证失败");
+    AlertRule managed = spec.id() == null ? findManagedAlertRule(token, spec.planId(), spec.assetId()) : null;
+    Long ruleId = spec.id();
+    if (ruleId == null && managed != null) ruleId = managed.id();
+    Map<String, String> labels = new LinkedHashMap<>();
+    labels.put("managedBy", "ops-platform");
+    labels.put("severity", spec.level().toLowerCase());
+    labels.put("planId", String.valueOf(spec.planId()));
+    labels.put("assetId", String.valueOf(spec.assetId()));
+    Map<String, Object> body = new LinkedHashMap<>();
+    if (ruleId != null) body.put("id", ruleId);
+    body.put("name", spec.name());
+    body.put("type", "realtime");
+    body.put("expr", spec.expression());
+    body.put("period", spec.period());
+    body.put("times", spec.times());
+    body.put("labels", labels);
+    body.put("annotations", Map.of("summary", spec.name()));
+    body.put("template", "");
+    body.put("datasource", "hertzbeat");
+    body.put("enable", spec.enable());
+    JsonNode response = sendJson(token, "/api/alert/define", ruleId == null ? "POST" : "PUT", body);
+    if (response.path("code").asInt(-1) != 0) {
+      throw new IllegalStateException("HertzBeat 同步告警规则失败：" + response.path("msg").asText("未知错误"));
+    }
+    return ruleId == null ? requireManagedAlertRule(token, spec.planId(), spec.assetId()) : getAlertRule(token, ruleId);
+  }
+
+  public AlertRule getAlertRule(long ruleId) throws Exception {
+    return getAlertRule(login(), ruleId);
+  }
+
+  public void deleteAlertRule(long ruleId) throws Exception {
+    String token = login();
+    HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/alert/define/" + ruleId))
+        .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + token).DELETE().build();
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    JsonNode json = response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
+    if (response.statusCode() == 404 || json.path("code").asInt(-1) == 3
+        || json.path("msg").asText("").toLowerCase().contains("not exist")) return;
+    if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
+      throw new IllegalStateException("HertzBeat 删除告警规则失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
+    }
+  }
+
   public MonitorStatus monitorStatus(long monitorId) throws Exception {
     String token = login();
-    JsonNode data = getJson(token, "/api/monitor/" + monitorId).path("data");
+    JsonNode data = getMonitorDetails(token, monitorId);
     JsonNode monitor = data.has("monitor") ? data.path("monitor") : data;
     if (monitor.isMissingNode() || monitor.isNull()) return new MonitorStatus("UNKNOWN", null, false);
     JsonNode runtimeStatus = first(monitor, "monitorStatus", "available", "availability", "state");
@@ -119,6 +173,15 @@ public class HertzBeatClient {
           && !metrics.path("valueRows").isEmpty()) status = "UP";
     }
     return new MonitorStatus(status, collectedAt, disabled);
+  }
+
+  public MonitorConfig getMonitorConfig(long monitorId) throws Exception {
+    JsonNode data = getMonitorDetails(login(), monitorId);
+    JsonNode monitor = data.has("monitor") ? data.path("monitor") : data;
+    return new MonitorConfig(monitor.path("id").asLong(), monitor.path("name").asText(),
+        monitor.path("app").asText(), monitor.path("instance").asText(), monitor.path("intervals").asInt(),
+        monitor.path("scheduleType").asText(), monitor.path("status").asInt() != 0,
+        stringMap(monitor.path("labels")), objectList(data.path("params")));
   }
 
   public List<ExternalAlert> alerts(String status) throws Exception {
@@ -225,6 +288,89 @@ public class HertzBeatClient {
     return json;
   }
 
+  private JsonNode sendJson(String token, String path, String method, Map<String, Object> body) throws Exception {
+    HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        .timeout(Duration.ofSeconds(8))
+        .header("Content-Type", "application/json")
+        .header("Authorization", "Bearer " + token)
+        .method(method, HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+        .build();
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    JsonNode json = response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      throw new IllegalStateException("HertzBeat 请求失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
+    }
+    return json;
+  }
+
+  private AlertRule findManagedAlertRule(String token, Long planId, Long assetId) throws Exception {
+    List<AlertRule> matches = new ArrayList<>();
+    int pageIndex = 0;
+    while (true) {
+      JsonNode data = getJson(token, "/api/alert/defines?pageIndex=" + pageIndex + "&pageSize=100").path("data");
+      JsonNode content = data.path("content");
+      if (!content.isArray()) throw new IllegalStateException("HertzBeat 告警规则列表响应缺少 content");
+      for (JsonNode item : content) {
+        JsonNode labels = item.path("labels");
+        if ("ops-platform".equals(labels.path("managedBy").asText())
+            && String.valueOf(planId).equals(labels.path("planId").asText())
+            && String.valueOf(assetId).equals(labels.path("assetId").asText())) {
+          matches.add(alertRule(item));
+        }
+      }
+      boolean last = data.path("last").asBoolean(true);
+      int totalPages = data.path("totalPages").asInt(pageIndex + 1);
+      if (last || pageIndex + 1 >= totalPages) break;
+      pageIndex++;
+    }
+    if (matches.size() > 1) throw new IllegalStateException("HertzBeat 存在重复受管告警规则");
+    return matches.isEmpty() ? null : matches.getFirst();
+  }
+
+  private AlertRule requireManagedAlertRule(String token, Long planId, Long assetId) throws Exception {
+    AlertRule rule = findManagedAlertRule(token, planId, assetId);
+    if (rule == null) throw new AlertRuleNotFoundException(planId + ":" + assetId);
+    return rule;
+  }
+
+  private AlertRule getAlertRule(String token, long ruleId) throws Exception {
+    HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/alert/define/" + ruleId))
+        .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + token).GET().build();
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    JsonNode json = response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
+    if (response.statusCode() == 404 || json.path("code").asInt(-1) == 3
+        || json.path("msg").asText("").toLowerCase().contains("not exist")) {
+      throw new AlertRuleNotFoundException(String.valueOf(ruleId));
+    }
+    if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
+      throw new IllegalStateException("HertzBeat 查询告警规则失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
+    }
+    return alertRule(json.path("data"));
+  }
+
+  private AlertRule alertRule(JsonNode node) {
+    return new AlertRule(node.path("id").asLong(), node.path("name").asText(), node.path("type").asText(),
+        node.path("expr").asText(),
+        node.path("period").asInt(), node.path("times").asInt(), node.path("enable").asBoolean(),
+        node.path("datasource").asText(), stringMap(node.path("labels")), stringMap(node.path("annotations")));
+  }
+
+  private Map<String, String> stringMap(JsonNode node) {
+    Map<String, String> values = new LinkedHashMap<>();
+    if (node.isObject()) node.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText()));
+    return values;
+  }
+
+  private List<Map<String, Object>> objectList(JsonNode node) {
+    List<Map<String, Object>> values = new ArrayList<>();
+    if (node.isArray()) node.forEach(item -> {
+      Map<String, Object> value = new LinkedHashMap<>();
+      item.fields().forEachRemaining(entry -> value.put(entry.getKey(), objectMapper.convertValue(entry.getValue(), Object.class)));
+      values.add(value);
+    });
+    return values;
+  }
+
   private JsonNode first(JsonNode node, String... fields) {
     for (String field : fields) if (node.hasNonNull(field)) return node.path(field);
     return objectMapper.missingNode();
@@ -267,7 +413,11 @@ public class HertzBeatClient {
         .GET()
         .build();
     HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    JsonNode json = objectMapper.readTree(response.body());
+    JsonNode json = response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
+    if (response.statusCode() == 404 || json.path("code").asInt(-1) == 3
+        || json.path("msg").asText("").toLowerCase().contains("not exist")) {
+      throw new MonitorNotFoundException(monitorId);
+    }
     if (response.statusCode() < 200 || response.statusCode() >= 300 || json.path("code").asInt(-1) != 0) {
       throw new IllegalStateException("HertzBeat 查询监控详情失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
     }
@@ -330,7 +480,7 @@ public class HertzBeatClient {
   private MonitorTarget monitorTarget(Asset asset) {
     URI endpoint = URI.create(asset.getEndpoint().contains("://") ? asset.getEndpoint() : "tcp://" + asset.getEndpoint());
     String host = endpoint.getHost();
-    if (host == null || host.isBlank()) throw new IllegalArgumentException("资产连接地址无法识别");
+    if (host == null || host.isBlank()) throw new IllegalArgumentException("服务连接地址无法识别");
     if ("HTTP".equalsIgnoreCase(asset.getType())) {
       int port = endpoint.getPort() > 0 ? endpoint.getPort() : "https".equalsIgnoreCase(endpoint.getScheme()) ? 443 : 80;
       String uri = endpoint.getRawPath() == null || endpoint.getRawPath().isBlank() ? "/" : endpoint.getRawPath();
@@ -354,7 +504,7 @@ public class HertzBeatClient {
       case "MYSQL" -> 3306;
       case "POSTGRESQL" -> 5432;
       case "REDIS" -> 6379;
-      default -> throw new IllegalArgumentException("暂不支持同步该资产类型：" + type);
+      default -> throw new IllegalArgumentException("暂不支持同步该服务类型：" + type);
     };
   }
 
@@ -362,7 +512,15 @@ public class HertzBeatClient {
 
   public record Status(boolean connected, String endpoint, long durationMillis, String message) {}
   public record SyncResult(long monitorId, String message) {}
+  public record AlertRuleSpec(Long id, String name, String expression, Integer period, Integer times,
+                              String level, Long planId, Long assetId, boolean enable) {}
+  public record AlertRule(long id, String name, String type, String expression, int period, int times,
+                          boolean enable, String datasource, Map<String, String> labels,
+                          Map<String, String> annotations) {}
   public record MonitorStatus(String status, LocalDateTime collectedAt, boolean disabled) {}
+  public record MonitorConfig(long id, String name, String app, String instance, int intervalSeconds,
+                              String scheduleType, boolean enabled, Map<String, String> labels,
+                              List<Map<String, Object>> params) {}
   public record ExternalAlert(String externalId, long monitorId, String level, String message,
                               LocalDateTime occurredAt, LocalDateTime resolvedAt, Long assetId) {
     public ExternalAlert(String externalId, long monitorId, String level, String message,
@@ -378,5 +536,9 @@ public class HertzBeatClient {
   public static class MonitorNotFoundException extends IllegalStateException {
     public MonitorNotFoundException(long monitorId) { super("HertzBeat 监控不存在：" + monitorId); }
     private MonitorNotFoundException(String path) { super("HertzBeat 监控不存在：" + path); }
+  }
+
+  public static class AlertRuleNotFoundException extends IllegalStateException {
+    public AlertRuleNotFoundException(String identity) { super("HertzBeat 告警规则不存在：" + identity); }
   }
 }

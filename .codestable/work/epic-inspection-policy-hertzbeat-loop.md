@@ -2,8 +2,8 @@
 epic: ../epics/inspection-policy-hertzbeat-loop.md
 phase: executing
 approved_revision: dc3ee008133559e332fa9bfbab9366fd5f68bcd31f907a61152b15408853b1a8
-current_item: ITEM-2
-next_action: 冻结 HertzBeat 2.0 Monitor 与告警规则真实配置契约，扩展客户端 CRUD 和契约测试
+current_item: ITEM-3
+next_action: 实现巡检计划驱动的版本化同步任务、自动同步、手动补偿同步和周期 reconciliation
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -11,7 +11,7 @@ remote_publish: manual
 ---
 ## 子项进度
 - [x] ITEM-1
-- [ ] ITEM-2
+- [x] ITEM-2
 - [ ] ITEM-3
 - [ ] ITEM-4
 - [ ] ITEM-5
@@ -48,3 +48,13 @@ remote_publish: manual
 - 新审查阶段首轮修复：项目名称实际变化时，如旧名称仍有关联服务/计划或项目 ID 被结构化计划引用则返回 409；项目删除同时按 `projectId` 检查结构化计划；结构化计划创建和更新只接受 `ENABLED/DISABLED`。对应测试先复现 200/201 错误结果，修复后目标测试和完整 `mvn -q test` 均通过。
 - 新审查阶段第二轮复审：Pauli 审查完整 staged SHA-256 `c78740f04d3c18aa8b2190c37733ba32ad17a15e2ef7fcf4764230461450be31`，首轮 blocking/important 均 resolved，无 unresolved、new blocking、important 或 nit；ITEM-1 change review gate 通过。
 - ITEM-1 最终验证：沙箱外 `mvn -q test` 共 75 项，0 failures/errors/skipped；`git diff --cached --check` 通过；真实 PostgreSQL 已完成旧 schema 升级与 fresh schema 执行验证。
+- ITEM-2 真实 HertzBeat 2.0 契约探测：当前 Monitor 列表回读字段包含 `id/jobId/name/app/instance/intervals/scheduleType/status/type/labels/description`；Monitor 实体校验注解确认固定周期最小值为 10 秒，状态 0=Paused、1=Up、2=Down；`port` 与 `website` 的 `summary` 均为 priority 0 可用性采集。
+- ITEM-2 告警规则真实 CRUD：临时禁用规则 `ops-contract-probe-20261020` 使用 `type=realtime`、`expr=availability == 0`、`period/times`、labels/annotations/template、`datasource=hertzbeat` 成功 POST；PUT 将 period 1→5、times 2→3 并回读一致；DELETE 成功，删除后 GET 返回业务码 3 `AlertDefine not exist.`，临时规则已清理。
+- ITEM-2 TDD：新增 `syncMonitor(asset, intervalSeconds, enabled)`，旧 `sync(asset)` 保留 60 秒启用兼容；新增 Monitor 实际配置读取、最小周期校验和外部删除异常；新增告警规则创建后按名称回查 ID、原 ID 更新、未知字段兼容、连续失败参数、读取和幂等删除。`HertzBeatClientTest` 与完整 `mvn -q test` 均通过。
+- ITEM-2 首轮 change review：Godel 审查 staged SHA-256 `7f19ad984fcbbebaffec1feea62839ccfc997c75d490e43967682371f9c6122b`，指出创建规则前缺少按受管身份查重这一 blocking，以及 Monitor 回读缺 `instance/scheduleType/params/labels`、告警规则回读缺 `type/datasource/annotations`、Monitor 业务码 3 未映射为删除三个 important。
+- ITEM-2 首轮修复：创建前按 `managedBy + planId + assetId` 查询唯一受管规则，已有规则复用 ID 执行 PUT，多个匹配规则拒绝同步；补齐 Monitor 与告警规则实际配置字段；Monitor 业务码 3 映射为 `MonitorNotFoundException`。创建测试按“首次查询为空、POST、再次查询出现规则”模拟真实流程，并暴露及修复 nullable `Long` 条件表达式自动拆箱问题。
+- ITEM-2 修复后验证：沙箱外 `mvn -q -Dtest=HertzBeatClientTest test` 18 项通过；沙箱外完整 `mvn -q test` 退出码 0；`git diff --check` 通过。
+- ITEM-2 第二轮 change review：同 lineage reviewer Godel 审查 staged SHA-256 `43451f60ce5285a9cc7274ec34d58177694eb717d692de5776062567ffb60954`；Monitor 与告警规则回读字段已 resolved，但规则查重只读第一页、`monitorStatus()` 未统一业务码 3 删除语义仍 unresolved，无新增 finding。
+- ITEM-2 第二轮修复：受管规则查询遍历 HertzBeat 分页，并对缺少 `content` 的异常响应失败关闭；`monitorStatus()` 复用 `getMonitorDetails`，统一 HTTP 404、业务码 3 和 not-exist 文本的外部删除语义。新增第二页规则复用 PUT 和纯业务码 3 状态查询测试。
+- ITEM-2 第二轮修复后验证：沙箱外 `mvn -q -Dtest=HertzBeatClientTest test` 20 项通过；沙箱外完整 `mvn -q test` 退出码 0；`git diff --check` 通过。
+- ITEM-2 第三轮 change review：同 lineage reviewer Godel 审查 staged SHA-256 `50f2e429d1468a0a4aa8f50f2efe2a2977baad8519ae9c7931b27deb6ada147f`，确认分页查重、异常响应失败关闭和 Monitor 删除语义全部 resolved，无新增 blocking、important 或 nit；ITEM-2 gate 通过。
