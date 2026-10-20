@@ -4,11 +4,14 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import com.lqbz.ops.domain.*;
 import com.lqbz.ops.service.InspectionExecutionService;
+import com.lqbz.ops.service.InspectionPlanPolicyService;
+import com.lqbz.ops.service.MonitoringPolicyMigrationService;
 import com.lqbz.ops.integration.MonitoringCleanupService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,11 +34,16 @@ public class ResourceController {
   private final InspectionItemRepository inspectionItems;
   private final InspectionExecutionService inspectionExecutionService;
   private final MonitoringCleanupService monitoringCleanupService;
+  private final InspectionPlanPolicyService inspectionPlanPolicyService;
+  private final MonitoringPolicyMigrationService monitoringPolicyMigrationService;
+  private final InspectionPlanBindingRepository inspectionPlanBindings;
 
   public ResourceController(ProjectRepository projects, AssetRepository assets, InspectionRepository inspections,
       AlertRepository alerts, AuditLogRepository audits, InspectionPlanRepository inspectionPlans,
       InspectionItemRepository inspectionItems, InspectionExecutionService inspectionExecutionService,
-      MonitoringCleanupService monitoringCleanupService) {
+      MonitoringCleanupService monitoringCleanupService, InspectionPlanPolicyService inspectionPlanPolicyService,
+      MonitoringPolicyMigrationService monitoringPolicyMigrationService,
+      InspectionPlanBindingRepository inspectionPlanBindings) {
     this.projects = projects;
     this.assets = assets;
     this.inspections = inspections;
@@ -45,6 +53,9 @@ public class ResourceController {
     this.inspectionItems = inspectionItems;
     this.inspectionExecutionService = inspectionExecutionService;
     this.monitoringCleanupService = monitoringCleanupService;
+    this.inspectionPlanPolicyService = inspectionPlanPolicyService;
+    this.monitoringPolicyMigrationService = monitoringPolicyMigrationService;
+    this.inspectionPlanBindings = inspectionPlanBindings;
   }
 
   @GetMapping("/projects") public List<Project> projects() { return projects.findAll(Sort.by("id")); }
@@ -52,7 +63,17 @@ public class ResourceController {
   @GetMapping("/inspections") public List<Inspection> inspections() { return inspections.findAll(Sort.by(Sort.Direction.DESC, "executedAt")); }
   @GetMapping("/alerts") public List<Alert> alerts() { return alerts.findAll(Sort.by(Sort.Direction.DESC, "occurredAt")); }
   @GetMapping("/audits") public List<AuditLog> audits() { return audits.findAll(Sort.by(Sort.Direction.DESC, "operatedAt")); }
-  @GetMapping("/inspection-plans") public List<InspectionPlan> inspectionPlans() { return inspectionPlans.findAll(Sort.by("id")); }
+  @GetMapping("/inspection-plans") public List<InspectionPlanPolicyService.InspectionPlanView> inspectionPlans() {
+    return inspectionPlanPolicyService.list();
+  }
+  @GetMapping("/inspection-plans/{id}")
+  public InspectionPlanPolicyService.InspectionPlanView inspectionPlan(@PathVariable Long id) {
+    return inspectionPlanPolicyService.get(id);
+  }
+  @GetMapping("/inspection-plans/migration-report")
+  public MonitoringPolicyMigrationService.MigrationReport inspectionPlanMigrationReport() {
+    return monitoringPolicyMigrationService.dryRun();
+  }
   @GetMapping("/inspections/{id}/items") public List<InspectionItem> inspectionItems(@PathVariable Long id) {
     if (!inspections.existsById(id)) throw new NoSuchElementException("巡检记录不存在");
     return inspectionItems.findByInspectionIdOrderById(id);
@@ -61,7 +82,8 @@ public class ResourceController {
   @PostMapping("/projects")
   @ResponseStatus(HttpStatus.CREATED)
   public Project createProject(@Valid @RequestBody ProjectRequest request) {
-    Project project = projects.save(new Project(request.name(), request.owner(), request.description(), valueOr(request.status(), "RUNNING")));
+    Project project = projects.save(new Project(request.name(), valueOr(request.projectType(), "业务系统"), request.owner(),
+        request.contactPhone(), request.maintenanceExpiresAt(), request.description(), valueOr(request.status(), "RUNNING")));
     audits.save(new AuditLog("CREATE_PROJECT", "PROJECT", project.getName()));
     return project;
   }
@@ -70,15 +92,27 @@ public class ResourceController {
   @Transactional
   public Project updateProject(@PathVariable Long id, @Valid @RequestBody ProjectRequest request) {
     Project project = projects.findById(id).orElseThrow(() -> new NoSuchElementException("项目不存在"));
-    project.update(request.name(), request.owner(), request.description(), valueOr(request.status(), project.getStatus()));
+    if (!project.getName().equals(request.name())
+        && (assets.existsByProjectName(project.getName())
+            || inspectionPlans.existsByProjectName(project.getName())
+            || inspectionPlans.existsByProjectId(project.getId()))) {
+      throw new IllegalStateException("项目存在关联服务或巡检计划，不能修改项目名称");
+    }
+    project.update(request.name(), valueOr(request.projectType(), project.getProjectType()), request.owner(),
+        request.contactPhone(), request.maintenanceExpiresAt(), request.description(), valueOr(request.status(), project.getStatus()));
     audits.save(new AuditLog("UPDATE_PROJECT", "PROJECT", project.getName()));
     return project;
   }
 
   @DeleteMapping("/projects/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
+  @Transactional(isolation = Isolation.SERIALIZABLE)
   public void deleteProject(@PathVariable Long id) {
     Project project = projects.findById(id).orElseThrow(() -> new NoSuchElementException("项目不存在"));
+    if (assets.existsByProjectName(project.getName()) || inspectionPlans.existsByProjectName(project.getName())
+        || inspectionPlans.existsByProjectId(project.getId())) {
+      throw new IllegalStateException("项目存在关联服务或巡检计划，请先归档关联数据");
+    }
     projects.delete(project);
     audits.save(new AuditLog("DELETE_PROJECT", "PROJECT", project.getName()));
   }
@@ -94,7 +128,15 @@ public class ResourceController {
 
   @PostMapping("/inspection-plans")
   @ResponseStatus(HttpStatus.CREATED)
-  public InspectionPlan createInspectionPlan(@Valid @RequestBody InspectionPlanRequest request) {
+  public Object createInspectionPlan(@Valid @RequestBody InspectionPlanRequest request) {
+    if (request.monitoringPolicy()) {
+      InspectionPlanPolicyService.InspectionPlanView plan = inspectionPlanPolicyService.create(request);
+      audits.save(new AuditLog("CREATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.name()));
+      return plan;
+    }
+    if (request.scopeText() == null || request.scheduleText() == null || request.nextRunAt() == null) {
+      throw new IllegalArgumentException("旧巡检计划必须提供巡检范围、执行周期和下次执行时间");
+    }
     InspectionPlan plan = inspectionPlans.save(new InspectionPlan(request.name(), request.projectName(),
         request.scopeText(), request.scheduleText(), valueOr(request.status(), "ENABLED"), request.nextRunAt()));
     audits.save(new AuditLog("CREATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.getName()));
@@ -105,8 +147,14 @@ public class ResourceController {
   @Transactional
   public InspectionPlan updateInspectionPlan(@PathVariable Long id,
       @Valid @RequestBody InspectionPlanRequest request) {
+    if (request.monitoringPolicy()) {
+      throw new IllegalArgumentException("结构化巡检计划请使用 /api/monitoring-plans/{id}");
+    }
     InspectionPlan plan = inspectionPlans.findById(id)
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
+    if (plan.isMonitoringPolicy()) {
+      throw new IllegalArgumentException("结构化巡检计划请使用 /api/monitoring-plans/{id}");
+    }
     plan.update(request.name(), request.projectName(), request.scopeText(), request.scheduleText(),
         valueOr(request.status(), plan.getStatus()), request.nextRunAt());
     audits.save(new AuditLog("UPDATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.getName()));
@@ -118,8 +166,28 @@ public class ResourceController {
   public void deleteInspectionPlan(@PathVariable Long id) {
     InspectionPlan plan = inspectionPlans.findById(id)
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
+    if (plan.isMonitoringPolicy()) {
+      throw new IllegalArgumentException("结构化巡检计划请使用 /api/monitoring-plans/{id}");
+    }
     inspectionPlans.delete(plan);
     audits.save(new AuditLog("DELETE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.getName()));
+  }
+
+  @PutMapping("/monitoring-plans/{id}")
+  public InspectionPlanPolicyService.InspectionPlanView updateMonitoringPlan(@PathVariable Long id,
+      @Valid @RequestBody InspectionPlanRequest request) {
+    return inspectionPlanPolicyService.update(id, request);
+  }
+
+  @DeleteMapping("/monitoring-plans/{id}")
+  public InspectionPlanPolicyService.InspectionPlanView deleteMonitoringPlan(@PathVariable Long id) {
+    return inspectionPlanPolicyService.requestDelete(id);
+  }
+
+  @PostMapping("/inspection-plans/migration-claims")
+  public InspectionPlanPolicyService.MigrationBatchResult claimInspectionPlanMigration(
+      @RequestBody List<InspectionPlanPolicyService.MigrationClaim> claims) {
+    return inspectionPlanPolicyService.claimExisting(claims);
   }
 
   @PostMapping("/inspection-plans/{id}/execute")
@@ -133,7 +201,7 @@ public class ResourceController {
   @PutMapping("/assets/{id}")
   @Transactional
   public Asset updateAsset(@PathVariable Long id, @Valid @RequestBody AssetRequest request) {
-    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("资产不存在"));
+    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
     asset.update(request.name(), request.projectName(), valueOr(request.environmentName(), asset.getEnvironmentName()),
         request.type(), request.endpoint(), valueOr(request.status(), asset.getStatus()));
     audits.save(new AuditLog("UPDATE_ASSET", "ASSET", asset.getName()));
@@ -143,7 +211,10 @@ public class ResourceController {
   @DeleteMapping("/assets/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteAsset(@PathVariable Long id) {
-    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("资产不存在"));
+    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
+    if (inspectionPlanBindings.findByActiveOwnerKey(id).isPresent()) {
+      throw new IllegalStateException("服务已加入巡检计划，请先从计划中移除并完成监控清理");
+    }
     monitoringCleanupService.cleanupOrSchedule(asset);
     assets.delete(asset);
     audits.save(new AuditLog("DELETE_ASSET", "ASSET", asset.getName()));

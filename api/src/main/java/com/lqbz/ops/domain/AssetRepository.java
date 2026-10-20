@@ -9,6 +9,8 @@ public interface AssetRepository extends JpaRepository<Asset, Long> {
   long countByStatusIn(List<String> statuses);
   List<Asset> findByProjectNameOrderById(String projectName);
   List<Asset> findByMonitoringMode(String monitoringMode);
+  boolean existsByProjectName(String projectName);
+  long countByHertzbeatMonitorId(Long hertzbeatMonitorId);
 
   @Modifying
   @Transactional

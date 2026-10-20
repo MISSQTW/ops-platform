@@ -4,6 +4,8 @@ import com.lqbz.ops.domain.Alert;
 import com.lqbz.ops.domain.AlertRepository;
 import com.lqbz.ops.domain.Asset;
 import com.lqbz.ops.domain.AssetRepository;
+import com.lqbz.ops.domain.InspectionPlanBindingRepository;
+import com.lqbz.ops.domain.InspectionPlanRepository;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,11 +17,16 @@ public class MonitoringProjectionService {
   private final AssetRepository assets;
   private final AlertRepository alerts;
   private final HertzBeatClient client;
+  private final InspectionPlanBindingRepository bindings;
+  private final InspectionPlanRepository plans;
 
-  public MonitoringProjectionService(AssetRepository assets, AlertRepository alerts, HertzBeatClient client) {
+  public MonitoringProjectionService(AssetRepository assets, AlertRepository alerts, HertzBeatClient client,
+      InspectionPlanBindingRepository bindings, InspectionPlanRepository plans) {
     this.assets = assets;
     this.alerts = alerts;
     this.client = client;
+    this.bindings = bindings;
+    this.plans = plans;
   }
 
   @Transactional
@@ -70,6 +77,9 @@ public class MonitoringProjectionService {
           .orElseGet(() -> Alert.external("HERTZBEAT", external.externalId(), asset.getHertzbeatMonitorId(),
               normalizeLevel(external.level()), asset.getProjectName(), asset.getName(), external.message(),
               external.occurredAt() == null ? LocalDateTime.now() : external.occurredAt()));
+      bindings.findByActiveOwnerKey(asset.getId()).flatMap(binding -> plans.findById(binding.getPlanId()))
+          .ifPresent(plan -> alert.assignOwnershipSnapshot(plan.getProjectId(), plan.getId(), asset.getId(),
+              plan.getName(), plan.getProjectName(), asset.getName()));
       if (resolved) alert.resolve(external.resolvedAt() == null ? LocalDateTime.now() : external.resolvedAt());
       else alert.fire(external.message(), external.occurredAt() == null ? LocalDateTime.now() : external.occurredAt());
       alerts.save(alert);

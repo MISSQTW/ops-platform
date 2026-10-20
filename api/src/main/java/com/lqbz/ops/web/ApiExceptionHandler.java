@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.CannotSerializeTransactionException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -24,5 +26,33 @@ public class ApiExceptionHandler {
   @ResponseStatus(HttpStatus.NOT_FOUND)
   public Map<String, Object> notFound(NoSuchElementException exception) {
     return Map.of("message", exception.getMessage(), "errors", List.of());
+  }
+
+  @ExceptionHandler(IllegalArgumentException.class)
+  @ResponseStatus(HttpStatus.BAD_REQUEST)
+  public Map<String, Object> invalidArgument(IllegalArgumentException exception) {
+    return Map.of("message", exception.getMessage(), "errors", List.of());
+  }
+
+  @ExceptionHandler(IllegalStateException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public Map<String, Object> illegalState(IllegalStateException exception) {
+    return Map.of("message", exception.getMessage(), "errors", List.of());
+  }
+
+  @ExceptionHandler(CannotSerializeTransactionException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public Map<String, Object> serializationConflict(CannotSerializeTransactionException exception) {
+    return Map.of("message", "数据正在被并发修改，请重试", "errors", List.of());
+  }
+
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public Map<String, Object> conflict(DataIntegrityViolationException exception) {
+    Throwable root = exception.getMostSpecificCause();
+    String detail = root == null ? "" : String.valueOf(root.getMessage()).toLowerCase();
+    String message = detail.contains("uk_ops_project_name") || detail.contains("ops_project") && detail.contains("name")
+        ? "项目名称已存在" : "数据已存在或正在被使用";
+    return Map.of("message", message, "errors", List.of());
   }
 }

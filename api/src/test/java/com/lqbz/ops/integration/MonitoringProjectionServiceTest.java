@@ -7,6 +7,10 @@ import static org.mockito.Mockito.when;
 import com.lqbz.ops.domain.AlertRepository;
 import com.lqbz.ops.domain.Asset;
 import com.lqbz.ops.domain.AssetRepository;
+import com.lqbz.ops.domain.InspectionPlan;
+import com.lqbz.ops.domain.InspectionPlanBinding;
+import com.lqbz.ops.domain.InspectionPlanBindingRepository;
+import com.lqbz.ops.domain.InspectionPlanRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -16,7 +20,9 @@ class MonitoringProjectionServiceTest {
   private final AssetRepository assets = mock(AssetRepository.class);
   private final AlertRepository alerts = mock(AlertRepository.class);
   private final HertzBeatClient client = mock(HertzBeatClient.class);
-  private final MonitoringProjectionService service = new MonitoringProjectionService(assets, alerts, client);
+  private final InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
+  private final InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+  private final MonitoringProjectionService service = new MonitoringProjectionService(assets, alerts, client, bindings, plans);
 
   @Test
   void 状态同步成功应更新资产并清除陈旧标记() throws Exception {
@@ -79,6 +85,41 @@ class MonitoringProjectionServiceTest {
 
     assertThat(result.alertsUpdated()).isEqualTo(1);
     assertThat(existing.getExternalLifecycle()).isEqualTo("RESOLVED");
+  }
+
+  @Test
+  void 首次关联告警应写入不可变项目计划和服务快照() throws Exception {
+    Asset asset = asset();
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    asset.markSynced(321L, "同步成功");
+    InspectionPlan plan = InspectionPlan.monitoring("核心巡检", 9L, "订单平台", 60, 2, "CRITICAL");
+    org.springframework.test.util.ReflectionTestUtils.setField(plan, "id", 88L);
+    InspectionPlanBinding binding = InspectionPlanBinding.claimExisting(88L, 77L, 1L, 321L);
+    when(assets.findByMonitoringMode("HERTZBEAT")).thenReturn(List.of(asset));
+    when(client.monitorStatus(321L)).thenReturn(new HertzBeatClient.MonitorStatus("DOWN", LocalDateTime.now(), false));
+    when(client.alerts("firing")).thenReturn(List.of(new HertzBeatClient.ExternalAlert(
+        "snapshot-1", 321L, "critical", "接口不可用", LocalDateTime.now(), null, 77L)));
+    when(client.alerts("resolved")).thenReturn(List.of());
+    when(alerts.findByExternalSourceAndExternalAlertId("HERTZBEAT", "snapshot-1")).thenReturn(Optional.empty());
+    when(bindings.findByActiveOwnerKey(77L)).thenReturn(Optional.of(binding));
+    when(plans.findById(88L)).thenReturn(Optional.of(plan));
+    org.mockito.ArgumentCaptor<com.lqbz.ops.domain.Alert> captor =
+        org.mockito.ArgumentCaptor.forClass(com.lqbz.ops.domain.Alert.class);
+
+    service.sync(LocalDateTime.now());
+
+    org.mockito.Mockito.verify(alerts).save(captor.capture());
+    com.lqbz.ops.domain.Alert saved = captor.getValue();
+    assertThat(saved.getProjectId()).isEqualTo(9L);
+    assertThat(saved.getInspectionPlanId()).isEqualTo(88L);
+    assertThat(saved.getAssetId()).isEqualTo(77L);
+    assertThat(saved.getInspectionPlanName()).isEqualTo("核心巡检");
+    assertThat(saved.getProjectNameSnapshot()).isEqualTo("订单平台");
+    assertThat(saved.getTargetNameSnapshot()).isEqualTo("订单接口");
+
+    saved.assignOwnershipSnapshot(10L, 99L, 78L, "新计划", "新项目", "新服务");
+    assertThat(saved.getProjectId()).isEqualTo(9L);
+    assertThat(saved.getInspectionPlanName()).isEqualTo("核心巡检");
   }
 
   private Asset asset() {

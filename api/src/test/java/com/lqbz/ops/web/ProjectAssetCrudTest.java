@@ -50,6 +50,35 @@ class ProjectAssetCrudTest {
   }
 
   @Test
+  void 项目档案应保存类型联系方式和维保日期() throws Exception {
+    mockMvc.perform(post("/api/projects")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "档案测试系统",
+                "projectType", "政务应用",
+                "owner", "王工",
+                "contactPhone", "13800000000",
+                "maintenanceExpiresAt", "2027-12-31",
+                "description", "验证项目档案字段"))))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.projectType").value("政务应用"))
+        .andExpect(jsonPath("$.contactPhone").value("13800000000"))
+        .andExpect(jsonPath("$.maintenanceExpiresAt").value("2027-12-31"));
+  }
+
+  @Test
+  void 重复项目名称应返回冲突() throws Exception {
+    String body = objectMapper.writeValueAsString(Map.of(
+        "name", "唯一名称系统", "owner", "王工", "description", "第一次创建"));
+    mockMvc.perform(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isCreated());
+
+    mockMvc.perform(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.message").value("项目名称已存在"));
+  }
+
+  @Test
   void 新建资产未传环境时应默认为生产() throws Exception {
     MvcResult created = mockMvc.perform(post("/api/assets")
             .contentType(MediaType.APPLICATION_JSON)
@@ -70,6 +99,77 @@ class ProjectAssetCrudTest {
         .andExpect(jsonPath("$.environmentName").value("测试"));
 
     mockMvc.perform(delete("/api/assets/{id}", id)).andExpect(status().isNoContent());
+  }
+
+  @Test
+  void 项目存在关联服务时禁止直接删除() throws Exception {
+    MvcResult created = mockMvc.perform(post("/api/projects")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "禁止删除系统", "owner", "测试负责人", "description", "有关联服务"))))
+        .andExpect(status().isCreated()).andReturn();
+    long projectId = objectMapper.readTree(created.getResponse().getContentAsString()).path("id").asLong();
+    mockMvc.perform(post("/api/assets")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "禁止删除接口", "projectName", "禁止删除系统", "type", "HTTP",
+                "endpoint", "https://example.com/health"))))
+        .andExpect(status().isCreated());
+
+    mockMvc.perform(delete("/api/projects/{id}", projectId))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.message").value("项目存在关联服务或巡检计划，请先归档关联数据"));
+  }
+
+  @Test
+  void 服务属于启用计划时禁止直接删除() throws Exception {
+    MvcResult project = mockMvc.perform(post("/api/projects")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "绑定删除保护系统", "owner", "测试负责人", "description", "绑定删除保护"))))
+        .andExpect(status().isCreated()).andReturn();
+    long projectId = objectMapper.readTree(project.getResponse().getContentAsString()).path("id").asLong();
+    MvcResult asset = mockMvc.perform(post("/api/assets")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "绑定删除保护服务", "projectName", "绑定删除保护系统", "type", "HTTP",
+                "endpoint", "https://example.com/health"))))
+        .andExpect(status().isCreated()).andReturn();
+    long assetId = objectMapper.readTree(asset.getResponse().getContentAsString()).path("id").asLong();
+    mockMvc.perform(post("/api/inspection-plans")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "绑定删除保护计划", "projectId", projectId, "projectName", "绑定删除保护系统",
+                "intervalSeconds", 60, "failureThreshold", 2, "alertLevel", "CRITICAL",
+                "mode", "MONITORING", "assetIds", java.util.List.of(assetId)))))
+        .andExpect(status().isCreated());
+
+    mockMvc.perform(delete("/api/assets/{id}", assetId))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.message").value("服务已加入巡检计划，请先从计划中移除并完成监控清理"));
+  }
+
+  @Test
+  void 项目有关联数据时禁止修改名称() throws Exception {
+    MvcResult project = mockMvc.perform(post("/api/projects")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "不可改名系统", "owner", "测试负责人", "description", "改名保护"))))
+        .andExpect(status().isCreated()).andReturn();
+    long projectId = objectMapper.readTree(project.getResponse().getContentAsString()).path("id").asLong();
+    mockMvc.perform(post("/api/assets")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "关联服务", "projectName", "不可改名系统", "type", "HTTP",
+                "endpoint", "https://example.com/health"))))
+        .andExpect(status().isCreated());
+
+    mockMvc.perform(put("/api/projects/{id}", projectId)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of(
+                "name", "改名后的系统", "owner", "测试负责人", "description", "尝试改名"))))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.message").value("项目存在关联服务或巡检计划，不能修改项目名称"));
   }
 
   @Test

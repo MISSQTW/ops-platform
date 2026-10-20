@@ -22,11 +22,20 @@ public class Alert {
   private String externalSource;
   private String externalAlertId;
   private Long externalMonitorId;
+  private Long projectId;
+  private Long inspectionPlanId;
+  private Long assetId;
+  private String inspectionPlanName;
+  private String projectNameSnapshot;
+  private String targetNameSnapshot;
   private String externalLifecycle;
   private String handlingStatus;
   private LocalDateTime firstOccurredAt;
   private LocalDateTime lastOccurredAt;
   private LocalDateTime resolvedAt;
+  private String handledBy;
+  private LocalDateTime handledAt;
+  private String handlingNote;
 
   protected Alert() {}
 
@@ -65,6 +74,17 @@ public class Alert {
     this.resolvedAt = resolvedAt;
   }
 
+  public void assignOwnershipSnapshot(Long projectId, Long inspectionPlanId, Long assetId,
+      String inspectionPlanName, String projectName, String targetName) {
+    if (this.assetId != null) return;
+    this.projectId = projectId;
+    this.inspectionPlanId = inspectionPlanId;
+    this.assetId = assetId;
+    this.inspectionPlanName = inspectionPlanName;
+    this.projectNameSnapshot = projectName;
+    this.targetNameSnapshot = targetName;
+  }
+
   public void acknowledge() {
     this.handlingStatus = "ACKNOWLEDGED";
     this.status = "ACKNOWLEDGED";
@@ -85,4 +105,13 @@ public class Alert {
   public LocalDateTime getFirstOccurredAt() { return firstOccurredAt; }
   public LocalDateTime getLastOccurredAt() { return lastOccurredAt; }
   public LocalDateTime getResolvedAt() { return resolvedAt; }
+  public Long getProjectId() { return projectId; }
+  public Long getInspectionPlanId() { return inspectionPlanId; }
+  public Long getAssetId() { return assetId; }
+  public String getInspectionPlanName() { return inspectionPlanName; }
+  public String getProjectNameSnapshot() { return projectNameSnapshot; }
+  public String getTargetNameSnapshot() { return targetNameSnapshot; }
+  public String getHandledBy() { return handledBy; }
+  public LocalDateTime getHandledAt() { return handledAt; }
+  public String getHandlingNote() { return handlingNote; }
 }
