@@ -63,7 +63,10 @@ export const api = {
     updateAsset: (id, data) => mutate(`/assets/${id}`, 'PUT', data),
     deleteAsset: (id) => mutate(`/assets/${id}`, 'DELETE'),
     createInspectionPlan: (data) => mutate('/inspection-plans', 'POST', data),
-    updateInspectionPlan: (id, data) => mutate(`/inspection-plans/${id}`, 'PUT', data),
-    deleteInspectionPlan: (id) => mutate(`/inspection-plans/${id}`, 'DELETE'),
+    updateInspectionPlan: (id, data) => mutate(`/monitoring-plans/${id}`, 'PUT', data),
+    deleteInspectionPlan: (id) => mutate(`/monitoring-plans/${id}`, 'DELETE'),
+    deleteLegacyInspectionPlan: (id) => mutate(`/inspection-plans/${id}`, 'DELETE'),
+    syncInspectionPlan: (id) => mutate(`/monitoring-plans/${id}/sync`, 'POST'),
+    syncAllInspectionPlans: () => mutate('/monitoring-plans/sync-all', 'POST'),
     executeInspectionPlan: (id) => mutate(`/inspection-plans/${id}/execute`, 'POST'),
 };

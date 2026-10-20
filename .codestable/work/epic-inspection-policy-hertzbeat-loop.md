@@ -2,8 +2,8 @@
 epic: ../epics/inspection-policy-hertzbeat-loop.md
 phase: executing
 approved_revision: dc3ee008133559e332fa9bfbab9366fd5f68bcd31f907a61152b15408853b1a8
-current_item: ITEM-6
-next_action: 完善项目档案与服务操作面，移除服务页同步入口并补齐计划同步状态展示
+current_item: ITEM-7
+next_action: 执行真实 Docker 端到端矩阵并更新 README 与架构说明
 blocked_by: null
 item_progression: continuous
 milestone_commit: authorized
@@ -15,7 +15,7 @@ remote_publish: manual
 - [x] ITEM-3
 - [x] ITEM-4
 - [x] ITEM-5
-- [ ] ITEM-6
+- [x] ITEM-6
 - [ ] ITEM-7
 
 ## 临时决策与证据
@@ -33,6 +33,9 @@ remote_publish: manual
 - 本机发行包 `AlertDefineDTO` 字段包含 `name`、`type`、`expr`、`period`、`times`、`labels`、`annotations`、`template`、`enable`、`datasource`、`queryLanguage`；ITEM-2 需通过真实创建和回读冻结可用性表达式、`period/times` 连续失败语义及启停行为。
 - 当前仓库 `HertzBeatClient.sync` 仍固定 `monitor.intervals=60`，进一步证明 ITEM-2 必须把计划固定间隔纳入 Monitor 期望配置。
 - Owner 于 2026-10-20 明确确认冻结契约及 `continuous + authorized + remote manual` 执行策略；永久 Epic 转为 active，批准 SHA-256 为 `dc3ee008133559e332fa9bfbab9366fd5f68bcd31f907a61152b15408853b1a8`。
+- ITEM-6 完成项目档案与详情、服务所属计划/监控/告警展示、服务页同步入口移除、结构化巡检计划配置，以及单计划与全部计划手动同步；旧计划仅保留记录和删除兼容。
+- ITEM-6 前端 `npm run build` 退出码 0；后端 `InspectionPlanPolicyApiTest,InspectionPlanMonitoringSyncTest` 定向测试退出码 0。
+- ITEM-6 change review 第二轮冻结 SHA-256 `7c80d40878e6d682ae3e5ce743209f64d6bfea0d22f29e453ae11e0c09148821`，历史告警兼容与频率单位边界 finding 均 resolved，无 blocking、important 或 nit。
 - ITEM-1 TDD：`InspectionPolicyModelTest` 先因实体、仓储和构造器缺失编译失败，补实现后通过；`ProjectAssetCrudTest` 与 `InspectionPlanPolicyApiTest` 先因新字段、冲突映射和结构化计划请求缺失失败，补应用服务和兼容 DTO 后通过；`MonitoringPolicyMigrationServiceTest` 先因 dry-run 服务缺失失败，补实现后通过。
 - ITEM-1 验证：沙箱外执行 `mvn -q test`，57 项测试全部通过；沙箱内同命令仅因 `HertzBeatClientTest` 无权监听本地端口失败，不是业务回归。
 - ITEM-1 首轮 change review 的 blocking/important 已处理：结构化计划使用专用更新/逻辑删除接口；binding 以可释放的 `activeOwnerKey` 保证单一当前归属并保留历史；迁移报告不再按项目名猜测；增加分批认领入口、版本化持久任务骨架、项目关联删除保护、命名约束错误映射和不可变告警归属快照。

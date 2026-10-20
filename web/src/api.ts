@@ -6,7 +6,7 @@ export type Summary = {
   inspectionPassRate: number
 }
 
-export type Project = { id: number; name: string; owner: string; description: string; status: string }
+export type Project = { id: number; name: string; projectType: string; owner: string; contactPhone: string | null; maintenanceExpiresAt: string | null; description: string; status: string }
 export type Asset = {
   id: number
   name: string
@@ -29,8 +29,10 @@ export type Asset = {
 }
 export type AssetInput = Pick<Asset, 'name' | 'projectName' | 'environmentName' | 'type' | 'endpoint' | 'status'>
 export type Inspection = { id: number; name: string; projectName: string; status: string; passedChecks: number; totalChecks: number; durationSeconds: number; executedAt: string }
-export type InspectionPlan = { id: number; name: string; projectName: string; scopeText: string; scheduleText: string; status: string; nextRunAt: string }
-export type InspectionPlanInput = Omit<InspectionPlan, 'id' | 'status'> & { status?: string }
+export type InspectionPlan = { id: number; name: string; projectId: number | null; projectName: string; scopeText: string; scheduleText: string; status: string; nextRunAt: string; intervalSeconds: number | null; failureThreshold: number | null; alertLevel: string | null; lifecycleStatus: string | null; syncStatus: string | null; desiredVersion: number; lastSyncAttemptAt: string | null; lastSyncSucceededAt: string | null; lastVerifiedAt: string | null; syncError: string | null; assetIds: number[] }
+export type InspectionPlanInput = { name: string; projectId: number; projectName: string; status: string; intervalSeconds: number; failureThreshold: number; alertLevel: string; assetIds: number[]; mode: 'MONITORING' }
+export type PlanSyncSummary = { planId: number; status: string; processedTasks: number; error: string | null }
+export type PlanSyncAllSummary = { totalPlans: number; results: PlanSyncSummary[] }
 export type InspectionItem = { id: number; inspectionId: number; category: string; targetName: string; checkName: string; status: string; message: string; durationMillis: number }
 export type Alert = { id: number; level: string; projectName: string; targetName: string; message: string; status: string; handlingStatus: string; occurredAt: string; externalLifecycle?: string; firstOccurredAt?: string; lastOccurredAt?: string; resolvedAt?: string; projectId?: number; inspectionPlanId?: number; assetId?: number; inspectionPlanName?: string; projectNameSnapshot?: string; targetNameSnapshot?: string; handledBy?: string; handledAt?: string; handlingNote?: string }
 export type AlertHandlingEvent = { id: number; alertId: number; action: string; fromStatus: string; toStatus: string; operatorName: string; note: string; occurredAt: string }
@@ -99,14 +101,17 @@ export const api = {
   syncMonitoringData: () => mutate<MonitoringSyncRun>('/integrations/hertzbeat/monitoring/sync', 'POST'),
   monitoringRuns: () => request<MonitoringSyncRun[]>('/integrations/hertzbeat/monitoring/runs'),
   monitoringDetails: (id: number) => request<MonitoringDetails>(`/integrations/hertzbeat/assets/${id}/details`),
-  createProject: (data: Omit<Project, 'id' | 'status'> & { status?: string }) => mutate<Project>('/projects', 'POST', data),
+  createProject: (data: Omit<Project, 'id'>) => mutate<Project>('/projects', 'POST', data),
   updateProject: (id: number, data: Omit<Project, 'id'>) => mutate<Project>(`/projects/${id}`, 'PUT', data),
   deleteProject: (id: number) => mutate<void>(`/projects/${id}`, 'DELETE'),
   createAsset: (data: AssetInput) => mutate<Asset>('/assets', 'POST', data),
   updateAsset: (id: number, data: AssetInput) => mutate<Asset>(`/assets/${id}`, 'PUT', data),
   deleteAsset: (id: number) => mutate<void>(`/assets/${id}`, 'DELETE'),
   createInspectionPlan: (data: InspectionPlanInput) => mutate<InspectionPlan>('/inspection-plans', 'POST', data),
-  updateInspectionPlan: (id: number, data: Omit<InspectionPlan, 'id'>) => mutate<InspectionPlan>(`/inspection-plans/${id}`, 'PUT', data),
-  deleteInspectionPlan: (id: number) => mutate<void>(`/inspection-plans/${id}`, 'DELETE'),
+  updateInspectionPlan: (id: number, data: InspectionPlanInput) => mutate<InspectionPlan>(`/monitoring-plans/${id}`, 'PUT', data),
+  deleteInspectionPlan: (id: number) => mutate<InspectionPlan>(`/monitoring-plans/${id}`, 'DELETE'),
+  deleteLegacyInspectionPlan: (id: number) => mutate<void>(`/inspection-plans/${id}`, 'DELETE'),
+  syncInspectionPlan: (id: number) => mutate<PlanSyncSummary>(`/monitoring-plans/${id}/sync`, 'POST'),
+  syncAllInspectionPlans: () => mutate<PlanSyncAllSummary>('/monitoring-plans/sync-all', 'POST'),
   executeInspectionPlan: (id: number) => mutate<Inspection>(`/inspection-plans/${id}/execute`, 'POST'),
 }
