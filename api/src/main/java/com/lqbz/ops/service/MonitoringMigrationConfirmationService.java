@@ -39,6 +39,7 @@ public class MonitoringMigrationConfirmationService {
 
   @Transactional
   public MonitoringMigrationProposal prepare(Long assetId, Long projectId, Integer selectedIntervalSeconds) {
+    topologyLock.acquireServices(List.of(assetId));
     topologyLock.acquire();
     Asset asset = requireAsset(assetId, projectId);
     var item = eligibleItem(assetId);

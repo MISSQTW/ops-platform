@@ -77,7 +77,9 @@ npm run dev
 
 计划显示未同步、同步中、部分成功或失败时可手动补偿；外部不可用时保留期望配置并重试。Monitor 和规则都同步成功后，该服务停止平台本地周期检查；迁移中或同步失败的服务保留原检查兜底。
 
-旧计划显示“待迁移”。先通过 `GET /api/inspection-plans/migration-report` 查看迁移报告，再通过 `POST /api/inspection-plans/migration-claims` 提交明确的计划与服务 ID 批次，避免猜测历史归属。
+旧计划显示“待迁移”。先查看迁移报告，再通过迁移提案准备与确认接口操作；旧 `POST /api/inspection-plans/migration-claims` 返回 410。普通计划创建、增加服务及重新获取所有权不能绕过存量迁移检查。
+
+服务删除与计划获取服务使用共同的服务级事务锁，避免删除后产生无法清理的绑定；仍有未清理绑定时禁止删除服务。停用计划删除或移除服务时，只有已由其他计划接管的 Monitor 才保留，无人接管则预留所有权并完成外部清理，失败后保留重试载体。清理历史 Monitor 不会清空后来重建的 Monitor 映射。
 
 当前平台只有管理员账号。组件入口通过 `canManageIntegrations` 会话能力控制显示，进入 HertzBeat 后仍使用 HertzBeat 自身账号认证，不提供自动登录或认证绕过。
 

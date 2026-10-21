@@ -26,16 +26,18 @@ public class InspectionPlanPolicyService {
   private final InspectionPlanBindingRepository bindings;
   private final MonitoringConfigTaskRepository tasks;
   private final ApplicationEventPublisher events;
+  private final MonitoringMigrationTopologyLock topologyLock;
 
   public InspectionPlanPolicyService(ProjectRepository projects, AssetRepository assets,
       InspectionPlanRepository plans, InspectionPlanBindingRepository bindings,
-      MonitoringConfigTaskRepository tasks, ApplicationEventPublisher events) {
+      MonitoringConfigTaskRepository tasks, ApplicationEventPublisher events, MonitoringMigrationTopologyLock topologyLock) {
     this.projects = projects;
     this.assets = assets;
     this.plans = plans;
     this.bindings = bindings;
     this.tasks = tasks;
     this.events = events;
+    this.topologyLock = topologyLock;
   }
 
   @Transactional(readOnly = true)
@@ -55,6 +57,7 @@ public class InspectionPlanPolicyService {
     if (!project.getName().equals(request.projectName())) throw new IllegalArgumentException("项目标识与项目名称不一致");
     List<Long> assetIds = request.assetIds() == null ? List.of() : request.assetIds();
     if (assetIds.isEmpty()) throw new IllegalArgumentException("巡检计划至少选择一个服务");
+    topologyLock.acquireServices(assetIds);
     List<Asset> selected = assets.findAllById(assetIds);
     if (selected.size() != assetIds.size() || selected.stream().anyMatch(asset -> !project.getName().equals(asset.getProjectName()))) {
       throw new IllegalArgumentException("巡检计划只能选择所属项目下的服务");
@@ -62,6 +65,7 @@ public class InspectionPlanPolicyService {
     if (request.intervalSeconds() == null || request.failureThreshold() == null || request.alertLevel() == null) {
       throw new IllegalArgumentException("巡检频率、连续失败次数和告警级别不能为空");
     }
+    selected.forEach(this::requireOrdinaryAdmission);
     InspectionPlan plan = InspectionPlan.monitoring(request.name(), project.getId(), project.getName(),
         request.intervalSeconds(), request.failureThreshold(), request.alertLevel());
     plan.configureStatus(requireStatus(valueOr(request.status(), "ENABLED")));
@@ -87,11 +91,23 @@ public class InspectionPlanPolicyService {
     if (!project.getId().equals(plan.getProjectId()) || !project.getName().equals(request.projectName())) {
       throw new IllegalArgumentException("结构化巡检计划不能变更所属项目");
     }
+    topologyLock.acquireServices(request.assetIds() == null ? List.of() : request.assetIds());
     List<Long> assetIds = requireAssets(project, request.assetIds());
     String requestedStatus = requireStatus(valueOr(request.status(), plan.getStatus()));
     if ("ENABLED".equals(requestedStatus)) assets.findAllById(assetIds).forEach(asset ->
         com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint()));
     List<InspectionPlanBinding> existing = bindings.findByPlanIdOrderById(plan.getId());
+    for (Long assetId : assetIds) {
+      boolean restoring = existing.stream().anyMatch(binding -> assetId.equals(binding.getAssetId())
+          && "PENDING_RELEASE".equals(binding.getOwnershipStatus()) && assetId.equals(binding.getActiveOwnerKey()));
+      boolean retained = existing.stream().anyMatch(binding -> assetId.equals(binding.getAssetId())
+          && ("OWNED".equals(binding.getOwnershipStatus()) || "DISABLED_RELEASED".equals(binding.getOwnershipStatus())));
+      boolean reacquiring = "ENABLED".equals(requestedStatus) && existing.stream().anyMatch(binding ->
+          assetId.equals(binding.getAssetId()) && "DISABLED_RELEASED".equals(binding.getOwnershipStatus()));
+      Asset asset = assets.findById(assetId).orElseThrow();
+      if (restoring) requireUniqueMonitor(asset);
+      else if (!retained || reacquiring) requireOrdinaryAdmission(asset);
+    }
     if ("ENABLED".equals(requestedStatus) && "DISABLED".equals(plan.getStatus())) {
       List<Long> conflicts = existing.stream()
           .filter(binding -> assetIds.contains(binding.getAssetId()))
@@ -156,6 +172,7 @@ public class InspectionPlanPolicyService {
 
   @Transactional
   public InspectionPlanView prepareMigration(Long projectId, Long assetId, String name, int intervalSeconds) {
+    topologyLock.acquireServices(List.of(assetId));
     Project project = projects.findById(projectId).orElseThrow(() -> new NoSuchElementException("项目不存在"));
     Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("服务不存在"));
     if (!project.getName().equals(asset.getProjectName())) throw new IllegalArgumentException("服务与项目不匹配");
@@ -197,31 +214,7 @@ public class InspectionPlanPolicyService {
 
   @Transactional
   public MigrationBatchResult claimExisting(List<MigrationClaim> claims) {
-    int claimed = 0;
-    for (MigrationClaim claim : claims) {
-      InspectionPlan plan = plans.findByIdForUpdate(claim.planId())
-          .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-      Asset asset = assets.findById(claim.assetId()).orElseThrow(() -> new NoSuchElementException("服务不存在"));
-      if (!plan.isMonitoringPolicy() || !asset.getProjectName().equals(plan.getProjectName())) {
-        throw new IllegalArgumentException("迁移批次中的计划与服务不匹配");
-      }
-      if (!"ACTIVE".equals(plan.getLifecycleStatus()) || !"ENABLED".equals(plan.getStatus())) {
-        throw new IllegalArgumentException("只能认领到启用中的巡检计划");
-      }
-      com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint());
-      if (asset.getHertzbeatMonitorId() == null) throw new IllegalArgumentException("服务没有可认领的 HertzBeat Monitor");
-      if (assets.countByHertzbeatMonitorId(asset.getHertzbeatMonitorId()) != 1) {
-        throw new IllegalArgumentException("Monitor 不能唯一证明服务归属，禁止认领");
-      }
-      if (bindings.findByActiveOwnerKey(asset.getId()).isPresent()) {
-        throw new IllegalArgumentException("服务已被其他巡检计划认领");
-      }
-      bindings.save(InspectionPlanBinding.claimExisting(plan.getId(), asset.getId(), plan.getDesiredVersion(),
-          asset.getHertzbeatMonitorId()));
-      enqueueAndPublish(plan);
-      claimed++;
-    }
-    return new MigrationBatchResult(claimed, LocalDateTime.now());
+    throw new IllegalArgumentException("迁移认领入口已停用，请使用迁移提案确认");
   }
 
   @Transactional
@@ -261,6 +254,31 @@ public class InspectionPlanPolicyService {
       throw new IllegalArgumentException("巡检计划只能选择所属项目下的服务");
     }
     return assetIds;
+  }
+
+  private void requireOrdinaryAdmission(Asset asset) {
+    if (bindings.findByActiveOwnerKey(asset.getId()).isPresent()) {
+      throw new IllegalStateException("服务已被其他启用计划接管，请先完成原计划迁移或清理");
+    }
+    List<InspectionPlanBinding> history = bindings.findByAssetIdOrderById(asset.getId());
+    boolean approvedDisabled = history.stream().anyMatch(binding ->
+        ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())
+            || ("PENDING_RELEASE".equals(binding.getOwnershipStatus()) && binding.getActiveOwnerKey() == null
+                && "DISABLED".equals(binding.getMonitorActualState())))
+            && asset.getHertzbeatMonitorId() != null
+            && asset.getHertzbeatMonitorId().equals(binding.getHertzbeatMonitorId()));
+    requireUniqueMonitor(asset);
+    boolean legacy = plans.findAll().stream().anyMatch(plan -> !plan.isMonitoringPolicy()
+        && "ENABLED".equals(plan.getStatus()) && asset.getProjectName().equals(plan.getProjectName()));
+    if (!approvedDisabled && (asset.getHertzbeatMonitorId() != null || legacy)) {
+      throw new IllegalStateException("服务存在历史监控或旧计划，请通过迁移提案确认");
+    }
+  }
+
+  private void requireUniqueMonitor(Asset asset) {
+    if (asset.getHertzbeatMonitorId() != null && assets.countByHertzbeatMonitorId(asset.getHertzbeatMonitorId()) != 1) {
+      throw new IllegalStateException("Monitor映射重复，请先处理迁移冲突");
+    }
   }
 
   private int require(Integer value, String message) {

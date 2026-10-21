@@ -90,14 +90,21 @@ public class InspectionPlanBinding {
   public void requestRelease(long desiredVersion) {
     this.desiredVersion = desiredVersion;
     this.ownershipStatus = "PENDING_RELEASE";
-    this.monitorDesiredState = activeOwnerKey == null ? "DETACHED" : "DELETED";
+    this.monitorDesiredState = "DELETED";
     this.ruleDesiredState = "DELETED";
+  }
+
+  public void reserveReleaseOwnership(boolean transferred) {
+    if (!"PENDING_RELEASE".equals(ownershipStatus)) throw new IllegalStateException("只有待释放绑定可以预留清理");
+    this.activeOwnerKey = transferred ? null : assetId;
+    this.monitorDesiredState = transferred ? "DETACHED" : "DELETED";
   }
 
   public void restoreOwnership(long desiredVersion) {
     if (!"PENDING_RELEASE".equals(ownershipStatus)) throw new IllegalStateException("只有待释放绑定可以恢复");
     this.desiredVersion = desiredVersion;
     this.ownershipStatus = "OWNED";
+    this.activeOwnerKey = assetId;
     this.monitorDesiredState = "ENABLED";
     this.ruleDesiredState = "ENABLED";
   }

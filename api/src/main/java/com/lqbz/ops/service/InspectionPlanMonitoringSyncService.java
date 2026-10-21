@@ -28,17 +28,19 @@ public class InspectionPlanMonitoringSyncService {
   private final AssetRepository assets;
   private final HertzBeatClient hertzBeatClient;
   private final InspectionPlanMonitoringSyncService self;
+  private final MonitoringMigrationTopologyLock topologyLock;
 
   public InspectionPlanMonitoringSyncService(InspectionPlanRepository plans,
       InspectionPlanBindingRepository bindings, MonitoringConfigTaskRepository tasks,
       AssetRepository assets, HertzBeatClient hertzBeatClient,
-      @Lazy InspectionPlanMonitoringSyncService self) {
+      @Lazy InspectionPlanMonitoringSyncService self, MonitoringMigrationTopologyLock topologyLock) {
     this.plans = plans;
     this.bindings = bindings;
     this.tasks = tasks;
     this.assets = assets;
     this.hertzBeatClient = hertzBeatClient;
     this.self = self;
+    this.topologyLock = topologyLock;
   }
 
   @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -77,6 +79,7 @@ public class InspectionPlanMonitoringSyncService {
       refreshPlanSummary(plan, now);
       return;
     }
+    topologyLock.acquireServices(List.of(binding.getAssetId()));
     boolean reservedDisabled = "DISABLED_RELEASED".equals(binding.getOwnershipStatus());
     if (reservedDisabled) {
       if (bindings.findByActiveOwnerKey(binding.getAssetId()).isPresent()) {
@@ -84,6 +87,20 @@ public class InspectionPlanMonitoringSyncService {
         return;
       }
       binding.reserveDisabledReconciliation();
+      bindings.saveAndFlush(binding);
+    }
+    if ("PENDING_RELEASE".equals(binding.getOwnershipStatus())) {
+      Long monitorId = binding.getHertzbeatMonitorId() == null
+          ? assets.findById(binding.getAssetId()).map(Asset::getHertzbeatMonitorId).orElse(null)
+          : binding.getHertzbeatMonitorId();
+      boolean transferred = bindings.findByActiveOwnerKey(binding.getAssetId())
+          .filter(owner -> !owner.getId().equals(binding.getId())).isPresent();
+      if (!transferred && monitorId != null) {
+        transferred = bindings.findByAssetIdOrderById(binding.getAssetId()).stream().anyMatch(other ->
+            !other.getId().equals(binding.getId()) && !"RELEASED".equals(other.getOwnershipStatus())
+                && monitorId.equals(other.getHertzbeatMonitorId()));
+      }
+      binding.reserveReleaseOwnership(transferred);
       bindings.saveAndFlush(binding);
     }
     task.claim(now);
@@ -226,7 +243,7 @@ public class InspectionPlanMonitoringSyncService {
         binding.markMonitorFailed(message(exception), now);
         throw exception;
       }
-      asset.unbindMonitoring();
+      if (java.util.Objects.equals(asset.getHertzbeatMonitorId(), monitorId)) asset.unbindMonitoring();
     }
     binding.completeRelease(now);
   }

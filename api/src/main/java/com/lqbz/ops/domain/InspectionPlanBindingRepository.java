@@ -9,6 +9,7 @@ import jakarta.persistence.LockModeType;
 
 public interface InspectionPlanBindingRepository extends JpaRepository<InspectionPlanBinding, Long> {
   List<InspectionPlanBinding> findByPlanIdOrderById(Long planId);
+  List<InspectionPlanBinding> findByAssetIdOrderById(Long assetId);
   Optional<InspectionPlanBinding> findByPlanIdAndAssetIdAndOwnershipStatusNot(
       Long planId, Long assetId, String ownershipStatus);
   @Lock(LockModeType.PESSIMISTIC_WRITE)

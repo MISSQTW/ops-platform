@@ -475,6 +475,209 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
+  void 停用后无人接管删除计划必须删除Monitor并解绑服务() throws Exception {
+    Fixture fixture = fixture("停用后删除系统", "停用后删除接口");
+    var plan = policyService.create(request("停用后删除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(plan.id(), request("停用后删除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    clearInvocations(hertzBeatClient);
+
+    policyService.requestDelete(plan.id());
+
+    verify(hertzBeatClient).deleteMonitor(501L);
+    verify(hertzBeatClient).deleteAlertRule(601L);
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+    assertThat(plans.findById(plan.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+  }
+
+  @Test
+  void 当前owner先删除必须保留停用历史引用直到最后计划清理() throws Exception {
+    Fixture fixture = fixture("当前接管删除系统", "当前接管删除接口");
+    var old = policyService.create(request("停用历史计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(old.id(), request("停用历史计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    var current = policyService.create(request("当前启用计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    clearInvocations(hertzBeatClient);
+
+    policyService.requestDelete(current.id());
+
+    verify(hertzBeatClient, never()).deleteMonitor(anyLong());
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isEqualTo(501L);
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).isEmpty();
+    policyService.requestDelete(old.id());
+    verify(hertzBeatClient).deleteMonitor(501L);
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+  }
+
+  @Test
+  void 接管首次同步失败后删除不得误删停用历史引用的Monitor() throws Exception {
+    Fixture fixture = fixture("首次接管失败系统", "首次接管失败接口");
+    var old = policyService.create(request("失败前历史计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(old.id(), request("失败前历史计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    when(hertzBeatClient.getMonitorConfig(501L)).thenThrow(new IllegalStateException("临时不可用"));
+    var current = policyService.create(request("首次同步失败计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    assertThat(bindings.findByPlanIdOrderById(current.id()).getFirst().getHertzbeatMonitorId()).isNull();
+    org.mockito.Mockito.doAnswer(invocation -> monitorConfig()).when(hertzBeatClient).getMonitorConfig(501L);
+    clearInvocations(hertzBeatClient);
+
+    policyService.requestDelete(current.id());
+
+    verify(hertzBeatClient, never()).deleteMonitor(anyLong());
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isEqualTo(501L);
+    assertThat(plans.findById(current.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+    policyService.requestDelete(old.id());
+    verify(hertzBeatClient).deleteMonitor(501L);
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+  }
+
+  @Test
+  void 往返接管复用旧绑定后删除另一计划必须保留共享Monitor直到最后引用释放() throws Exception {
+    Fixture fixture = fixture("往返停用系统", "往返停用接口");
+    var first = policyService.create(request("往返计划A", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(first.id(), request("往返计划A", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    var second = policyService.create(request("往返计划B", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(second.id(), request("往返计划B", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    policyService.update(first.id(), request("往返计划A", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "ENABLED"));
+    policyService.update(first.id(), request("往返计划A", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    clearInvocations(hertzBeatClient);
+
+    policyService.requestDelete(second.id());
+
+    verify(hertzBeatClient, never()).deleteMonitor(anyLong());
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isEqualTo(501L);
+    policyService.requestDelete(first.id());
+    verify(hertzBeatClient).deleteMonitor(501L);
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void 移除清理失败后同计划重新加入必须恢复已有批准绑定(boolean ruleFailure) throws Exception {
+    Fixture fixture = fixture("撤销移除系统", "撤销移除接口");
+    Asset retained = assets.save(new Asset("撤销保留服务", fixture.project().getName(), "生产", "HTTP",
+        "https://retained.example.com/health", "UNKNOWN"));
+    when(hertzBeatClient.syncMonitor(any(), any(Integer.class), any(Boolean.class))).thenAnswer(invocation -> {
+      Asset asset = invocation.getArgument(0);
+      lastSyncedAsset.set(asset);
+      lastInterval.set(invocation.getArgument(1));
+      lastEnabled.set(invocation.getArgument(2));
+      return new HertzBeatClient.SyncResult(asset.getId().equals(retained.getId()) ? 502L : 501L, "独立Monitor");
+    });
+    when(hertzBeatClient.getMonitorConfig(502L)).thenAnswer(invocation -> monitorConfig(502L));
+    var plan = policyService.create(request("撤销移除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId(), retained.getId())));
+    Long originalBindingId = bindings.findByActiveOwnerKey(fixture.asset().getId()).orElseThrow().getId();
+    if (ruleFailure) doThrow(new IllegalStateException("规则删除失败")).when(hertzBeatClient).deleteAlertRule(601L);
+    else doThrow(new IllegalStateException("Monitor删除失败")).when(hertzBeatClient).deleteMonitor(501L);
+    policyService.update(plan.id(), request("撤销移除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(retained.getId())));
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get()
+        .extracting(InspectionPlanBinding::getOwnershipStatus).isEqualTo("PENDING_RELEASE");
+
+    policyService.update(plan.id(), request("撤销移除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId(), retained.getId())));
+
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get().satisfies(binding -> {
+      assertThat(binding.getId()).isEqualTo(originalBindingId);
+      assertThat(binding.getOwnershipStatus()).isEqualTo("OWNED");
+      assertThat(binding.getMonitorDesiredState()).isEqualTo("ENABLED");
+    });
+  }
+
+  @Test
+  void 后续接管计划再次停用后旧计划删除不得删除仍被引用的Monitor() throws Exception {
+    Fixture fixture = fixture("多轮停用系统", "多轮停用接口");
+    var old = policyService.create(request("首轮停用计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(old.id(), request("首轮停用计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    var next = policyService.create(request("再次停用计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(next.id(), request("再次停用计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    clearInvocations(hertzBeatClient);
+
+    policyService.requestDelete(old.id());
+
+    verify(hertzBeatClient, never()).deleteMonitor(anyLong());
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isEqualTo(501L);
+    assertThat(plans.findById(old.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+  }
+
+  @Test
+  void 删除历史停用计划不得清空后来重建的Monitor映射() throws Exception {
+    Fixture fixture = fixture("历史停用删除系统", "历史停用删除接口");
+    var plan = policyService.create(request("历史停用删除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(plan.id(), request("历史停用删除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    Asset current = assets.findById(fixture.asset().getId()).orElseThrow();
+    current.markSynced(502L, "后续计划重建的监控");
+    assets.saveAndFlush(current);
+    clearInvocations(hertzBeatClient);
+
+    policyService.requestDelete(plan.id());
+
+    verify(hertzBeatClient).deleteMonitor(501L);
+    verify(hertzBeatClient, never()).deleteMonitor(502L);
+    assertThat(assets.findById(current.getId()).orElseThrow().getHertzbeatMonitorId()).isEqualTo(502L);
+    assertThat(plans.findById(plan.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+  }
+
+  @Test
+  void 停用后无人接管移除服务必须删除Monitor() throws Exception {
+    Fixture fixture = fixture("停用后移除系统", "停用后移除接口");
+    Asset retained = assets.save(new Asset("保留服务", fixture.project().getName(), "生产", "HTTP",
+        "https://retained.example.com", "UNKNOWN"));
+    var plan = policyService.create(request("停用后移除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId(), retained.getId())));
+    policyService.update(plan.id(), request("停用后移除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId(), retained.getId()), "DISABLED"));
+    clearInvocations(hertzBeatClient);
+
+    policyService.update(plan.id(), request("停用后移除计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(retained.getId()), "DISABLED"));
+
+    verify(hertzBeatClient).deleteMonitor(501L);
+    assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+    assertThat(bindings.findByPlanIdOrderById(plan.id()).stream()
+        .filter(binding -> binding.getAssetId().equals(fixture.asset().getId())).findFirst()).get()
+        .extracting(InspectionPlanBinding::getOwnershipStatus).isEqualTo("RELEASED");
+  }
+
+  @Test
+  void 停用后删除Monitor失败必须保留所有权和可重试载体() throws Exception {
+    Fixture fixture = fixture("停用后删除失败系统", "停用后删除失败接口");
+    var plan = policyService.create(request("停用后删除失败计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(plan.id(), request("停用后删除失败计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    doThrow(new IllegalStateException("删除暂不可用")).when(hertzBeatClient).deleteMonitor(501L);
+
+    policyService.requestDelete(plan.id());
+
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get()
+        .extracting(InspectionPlanBinding::getOwnershipStatus).isEqualTo("PENDING_RELEASE");
+    assertThat(plans.findById(plan.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETING");
+    org.mockito.Mockito.doNothing().when(hertzBeatClient).deleteMonitor(501L);
+    syncService.syncPlan(plan.id());
+    assertThat(plans.findById(plan.id()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).isEmpty();
+  }
+
+  @Test
   void 新计划接管后删除旧计划不得删除共享Monitor() throws Exception {
     Fixture fixture = fixture("接管删除系统", "接管删除接口");
     InspectionPlanPolicyService.InspectionPlanView oldPlan = policyService.create(request(
@@ -501,6 +704,14 @@ class InspectionPlanMonitoringSyncTest {
         "https://retained.example.com/health", "UNKNOWN"));
     Asset transferred = assets.save(new Asset("被接管接口", project.getName(), "生产", "HTTP",
         "https://transferred.example.com/health", "UNKNOWN"));
+    when(hertzBeatClient.syncMonitor(any(), any(Integer.class), any(Boolean.class))).thenAnswer(invocation -> {
+      Asset asset = invocation.getArgument(0);
+      lastSyncedAsset.set(asset);
+      lastInterval.set(invocation.getArgument(1));
+      lastEnabled.set(invocation.getArgument(2));
+      return new HertzBeatClient.SyncResult(asset.getId().equals(retained.getId()) ? 502L : 501L, "独立Monitor");
+    });
+    when(hertzBeatClient.getMonitorConfig(502L)).thenAnswer(invocation -> monitorConfig(502L));
     InspectionPlanPolicyService.InspectionPlanView oldPlan = policyService.create(request(
         "旧移除计划", project.getId(), project.getName(), List.of(retained.getId(), transferred.getId())));
     policyService.update(oldPlan.id(), request("旧移除计划", project.getId(), project.getName(),

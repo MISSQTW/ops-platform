@@ -28,7 +28,8 @@ class MonitoringMigrationAdmissionTest {
     when(assets.findById(20L)).thenReturn(Optional.of(asset));
     when(assets.countByHertzbeatMonitorId(123L)).thenReturn(1L);
     InspectionPlanPolicyService service = new InspectionPlanPolicyService(mock(ProjectRepository.class),
-        assets, plans, bindings, mock(MonitoringConfigTaskRepository.class), mock(ApplicationEventPublisher.class));
+        assets, plans, bindings, mock(MonitoringConfigTaskRepository.class), mock(ApplicationEventPublisher.class),
+        mock(MonitoringMigrationTopologyLock.class));
 
     assertThatThrownBy(() -> service.claimExisting(
         List.of(new InspectionPlanPolicyService.MigrationClaim(10L, 20L))))

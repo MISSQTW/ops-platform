@@ -39,6 +39,7 @@ public class ResourceController {
   private final MonitoringPolicyMigrationService monitoringPolicyMigrationService;
   private final InspectionPlanBindingRepository inspectionPlanBindings;
   private final InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService;
+  private final com.lqbz.ops.service.MonitoringMigrationTopologyLock topologyLock;
 
   public ResourceController(ProjectRepository projects, AssetRepository assets, InspectionRepository inspections,
       AlertRepository alerts, AuditLogRepository audits, InspectionPlanRepository inspectionPlans,
@@ -46,7 +47,8 @@ public class ResourceController {
       MonitoringCleanupService monitoringCleanupService, InspectionPlanPolicyService inspectionPlanPolicyService,
       MonitoringPolicyMigrationService monitoringPolicyMigrationService,
       InspectionPlanBindingRepository inspectionPlanBindings,
-      InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService) {
+      InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService,
+      com.lqbz.ops.service.MonitoringMigrationTopologyLock topologyLock) {
     this.projects = projects;
     this.assets = assets;
     this.inspections = inspections;
@@ -60,6 +62,7 @@ public class ResourceController {
     this.monitoringPolicyMigrationService = monitoringPolicyMigrationService;
     this.inspectionPlanBindings = inspectionPlanBindings;
     this.inspectionPlanMonitoringSyncService = inspectionPlanMonitoringSyncService;
+    this.topologyLock = topologyLock;
   }
 
   @GetMapping("/projects") public List<Project> projects() { return projects.findAll(Sort.by("id")); }
@@ -200,7 +203,7 @@ public class ResourceController {
   @PostMapping("/inspection-plans/migration-claims")
   public InspectionPlanPolicyService.MigrationBatchResult claimInspectionPlanMigration(
       @RequestBody List<InspectionPlanPolicyService.MigrationClaim> claims) {
-    return inspectionPlanPolicyService.claimExisting(claims);
+    throw new org.springframework.web.server.ResponseStatusException(HttpStatus.GONE, "请使用迁移提案准备和确认接口");
   }
 
   @PostMapping("/inspection-plans/{id}/execute")
@@ -226,9 +229,11 @@ public class ResourceController {
 
   @DeleteMapping("/assets/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
+  @Transactional
   public void deleteAsset(@PathVariable Long id) {
+    topologyLock.acquireServices(List.of(id));
     Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
-    if (inspectionPlanBindings.findByActiveOwnerKey(id).isPresent()) {
+    if (inspectionPlanBindings.existsByAssetIdAndOwnershipStatusNot(id, "RELEASED")) {
       throw new IllegalStateException("服务已加入巡检计划，请先从计划中移除并完成监控清理");
     }
     monitoringCleanupService.cleanupOrSchedule(asset);

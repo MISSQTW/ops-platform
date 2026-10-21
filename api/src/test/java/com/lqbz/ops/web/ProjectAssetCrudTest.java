@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.MvcResult;
 class ProjectAssetCrudTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private com.lqbz.ops.domain.InspectionPlanBindingRepository bindings;
 
   @Test
   void 新建项目后应支持修改和删除() throws Exception {
@@ -121,29 +122,36 @@ class ProjectAssetCrudTest {
         .andExpect(jsonPath("$.message").value("项目存在关联服务或巡检计划，请先归档关联数据"));
   }
 
-  @Test
-  void 服务属于启用计划时禁止直接删除() throws Exception {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void 服务仍有未清理计划绑定时禁止直接删除(boolean disabledReleased) throws Exception {
     MvcResult project = mockMvc.perform(post("/api/projects")
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(Map.of(
-                "name", "绑定删除保护系统", "owner", "测试负责人", "description", "绑定删除保护"))))
+                "name", "绑定删除保护系统" + disabledReleased, "owner", "测试负责人", "description", "绑定删除保护"))))
         .andExpect(status().isCreated()).andReturn();
     long projectId = objectMapper.readTree(project.getResponse().getContentAsString()).path("id").asLong();
     MvcResult asset = mockMvc.perform(post("/api/assets")
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(Map.of(
-                "name", "绑定删除保护服务", "projectName", "绑定删除保护系统", "type", "HTTP",
+                "name", "绑定删除保护服务", "projectName", "绑定删除保护系统" + disabledReleased, "type", "HTTP",
                 "endpoint", "https://example.com/health"))))
         .andExpect(status().isCreated()).andReturn();
     long assetId = objectMapper.readTree(asset.getResponse().getContentAsString()).path("id").asLong();
     mockMvc.perform(post("/api/inspection-plans")
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(Map.of(
-                "name", "绑定删除保护计划", "projectId", projectId, "projectName", "绑定删除保护系统",
+                "name", "绑定删除保护计划", "projectId", projectId, "projectName", "绑定删除保护系统" + disabledReleased,
                 "intervalSeconds", 60, "failureThreshold", 2, "alertLevel", "CRITICAL",
                 "mode", "MONITORING", "assetIds", java.util.List.of(assetId)))))
         .andExpect(status().isCreated());
 
+    if (disabledReleased) {
+      var binding = bindings.findByActiveOwnerKey(assetId).orElseThrow();
+      binding.markSynchronized(111L, 222L, false, java.time.LocalDateTime.now());
+      binding.releaseDisabledOwnership();
+      bindings.saveAndFlush(binding);
+    }
     mockMvc.perform(delete("/api/assets/{id}", assetId))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.message").value("服务已加入巡检计划，请先从计划中移除并完成监控清理"));

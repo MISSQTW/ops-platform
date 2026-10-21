@@ -30,6 +30,13 @@ class InspectionPlanPolicyApiTest {
   @Autowired private InspectionPlanBindingRepository bindings;
 
   @Test
+  void 旧迁移认领入口应停用且不得绕过提案确认() throws Exception {
+    mockMvc.perform(post("/api/inspection-plans/migration-claims")
+        .contentType(MediaType.APPLICATION_JSON).content("[{\"planId\":1,\"assetId\":1}]"))
+        .andExpect(status().isGone());
+  }
+
+  @Test
   void 未知类型即使提供端口也不能加入启用计划() throws Exception {
     long projectId = createProject("类型准入系统");
     var response = mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON)

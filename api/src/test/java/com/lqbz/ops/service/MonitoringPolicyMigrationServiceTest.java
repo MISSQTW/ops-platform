@@ -98,12 +98,12 @@ class MonitoringPolicyMigrationServiceTest {
 
     InspectionPlanPolicyService service = new InspectionPlanPolicyService(projects, assets, plans, bindings,
         mock(com.lqbz.ops.domain.MonitoringConfigTaskRepository.class),
-        mock(org.springframework.context.ApplicationEventPublisher.class));
+        mock(org.springframework.context.ApplicationEventPublisher.class), mock(MonitoringMigrationTopologyLock.class));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claimExisting(
         List.of(new InspectionPlanPolicyService.MigrationClaim(10L, 20L))))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Monitor 不能唯一证明服务归属，禁止认领");
+        .hasMessage("迁移认领入口已停用，请使用迁移提案确认");
   }
 
   @Test
@@ -121,11 +121,11 @@ class MonitoringPolicyMigrationServiceTest {
 
     InspectionPlanPolicyService service = new InspectionPlanPolicyService(projects, assets, plans, bindings,
         mock(com.lqbz.ops.domain.MonitoringConfigTaskRepository.class),
-        mock(org.springframework.context.ApplicationEventPublisher.class));
+        mock(org.springframework.context.ApplicationEventPublisher.class), mock(MonitoringMigrationTopologyLock.class));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.claimExisting(
         List.of(new InspectionPlanPolicyService.MigrationClaim(30L, 40L))))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("只能认领到启用中的巡检计划");
+        .hasMessage("迁移认领入口已停用，请使用迁移提案确认");
   }
 }

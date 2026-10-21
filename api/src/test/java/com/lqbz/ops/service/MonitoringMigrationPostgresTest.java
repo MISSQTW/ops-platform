@@ -25,7 +25,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-@SpringBootTest
+@SpringBootTest(properties = "ops.inspection.scheduler-initial-delay-ms=3600000")
 @ActiveProfiles("test")
 @EnabledIfEnvironmentVariable(named = "OPS_MIGRATION_TEST_DB_URL",
     matches = "jdbc:postgresql://[^/]+/ops_platform_migration_test_[a-zA-Z0-9_]+")
@@ -49,6 +49,8 @@ class MonitoringMigrationPostgresTest {
   @Autowired private InspectionExecutionService execution;
   @SpyBean private InspectionPlanPolicyService policies;
   @SpyBean private MonitoringPolicyMigrationService reports;
+  @SpyBean private MonitoringMigrationTopologyLock ownershipLock;
+  @Autowired private com.lqbz.ops.web.ResourceController resources;
   @Autowired private javax.sql.DataSource dataSource;
   @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
   @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
@@ -56,16 +58,71 @@ class MonitoringMigrationPostgresTest {
 
   @BeforeEach
   void failExternalSync() throws Exception {
+    proposals.deleteAll();
+    tasks.deleteAll();
+    bindings.deleteAll();
+    plans.deleteAll();
+    assets.deleteAll();
+    projects.deleteAll();
     when(hertzBeatClient.syncMonitor(any(), any(Integer.class), any(Boolean.class)))
         .thenThrow(new IllegalStateException("故障注入：外部暂不可用"));
   }
 
   @AfterEach
-  void clearSpy() { reset(policies, reports); }
+  void clearSpy() { reset(policies, reports, ownershipLock); }
 
-  @Test
-  void 新接管提交领先于旧任务预留时唯一约束应在外部动作前回滚旧任务() throws Exception {
-    DisabledFixture fixture = disabledFixture();
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void 服务删除与新绑定准入必须按共同事务锁串行化(boolean deletingFirst) throws Exception {
+    String projectName = "PG删除准入" + System.nanoTime();
+    Project project = projects.save(new Project(projectName, "负责人", "删除准入竞争", "RUNNING"));
+    Asset asset = assets.save(new Asset("删除竞争服务", projectName, "生产", "HTTP", "http://127.0.0.1:1/", "UNKNOWN"));
+    CountDownLatch locked = new CountDownLatch(1);
+    CountDownLatch finishFirst = new CountDownLatch(1);
+    var firstLock = new java.util.concurrent.atomic.AtomicBoolean(true);
+    MonitoringMigrationTopologyLock lockTarget = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(ownershipLock);
+    doAnswer(invocation -> {
+      Object result = invocation.callRealMethod();
+      if (firstLock.compareAndSet(true, false)) {
+        locked.countDown();
+        if (!finishFirst.await(20, TimeUnit.SECONDS)) throw new IllegalStateException("测试未释放准入锁");
+      }
+      return result;
+    }).when(lockTarget).acquireServices(java.util.List.of(asset.getId()));
+    java.util.concurrent.Callable<Boolean> deleting = () -> { resources.deleteAsset(asset.getId()); return true; };
+    java.util.concurrent.Callable<Boolean> creating = () -> {
+      policies.create(new com.lqbz.ops.web.InspectionPlanRequest("删除竞争计划", project.getId(), projectName,
+          null, null, "ENABLED", null, 60, 2, "CRITICAL", java.util.List.of(asset.getId()), "MONITORING"));
+      return true;
+    };
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var first = executor.submit(deletingFirst ? deleting : creating);
+      assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+      var second = executor.submit(deletingFirst ? creating : deleting);
+      try {
+        boolean blocked = false;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!blocked && System.nanoTime() < deadline) {
+          blocked = Boolean.TRUE.equals(jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+                  + "AND wait_event_type='Lock' AND wait_event='advisory')", Boolean.class));
+          if (!blocked) Thread.sleep(20);
+        }
+        assertThat(blocked).isTrue();
+        assertThat(second.isDone()).isFalse();
+      } finally { finishFirst.countDown(); }
+      assertThat(first.get(30, TimeUnit.SECONDS)).isTrue();
+      assertThatThrownBy(() -> second.get(30, TimeUnit.SECONDS)).isInstanceOf(java.util.concurrent.ExecutionException.class)
+          .hasCauseInstanceOf(deletingFirst ? IllegalArgumentException.class : IllegalStateException.class);
+      assertThat(assets.existsById(asset.getId())).isEqualTo(!deletingFirst);
+      assertThat(bindings.findByActiveOwnerKey(asset.getId()).isPresent()).isEqualTo(!deletingFirst);
+    } finally { finishFirst.countDown(); }
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void 新接管提交领先时旧任务必须等待并拒绝外部误操作(boolean deleting) throws Exception {
+    DisabledFixture fixture = deleting ? releaseFixture() : disabledFixture();
     CountDownLatch inserted = new CountDownLatch(1);
     CountDownLatch commitOwner = new CountDownLatch(1);
     var ownerPid = new java.util.concurrent.atomic.AtomicInteger();
@@ -93,21 +150,21 @@ class MonitoringMigrationPostgresTest {
         while (!blocked && System.nanoTime() < deadline) {
           blocked = Boolean.TRUE.equals(jdbc.queryForObject(
               "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>? "
-                  + "AND wait_event_type='Lock' AND query ILIKE '%ops_inspection_plan_binding%')", Boolean.class, ownerPid.get()));
+                  + "AND wait_event_type='Lock' AND wait_event='advisory')", Boolean.class, ownerPid.get()));
           if (!blocked) Thread.sleep(20);
         }
         assertThat(blocked).isTrue();
       } finally { commitOwner.countDown(); }
       var owner = claiming.get(30, TimeUnit.SECONDS);
-      assertThatThrownBy(() -> correcting.get(30, TimeUnit.SECONDS))
-          .isInstanceOf(java.util.concurrent.ExecutionException.class)
-          .hasCauseInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+      assertThat(correcting.get(30, TimeUnit.SECONDS)).isTrue();
       assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get()
           .extracting(InspectionPlanBinding::getPlanId).isEqualTo(owner.id());
-      assertThat(tasks.findById(fixture.task().getId()).orElseThrow().getStatus()).isEqualTo("PENDING");
-      assertThat(bindings.findByPlanIdOrderById(fixture.plan().getId()).getFirst().getOwnershipStatus()).isEqualTo("DISABLED_RELEASED");
+      assertThat(tasks.findById(fixture.task().getId()).orElseThrow().getStatus()).isEqualTo(deleting ? "SUCCEEDED" : "OBSOLETE");
+      assertThat(bindings.findByPlanIdOrderById(fixture.plan().getId()).getFirst().getOwnershipStatus())
+          .isEqualTo(deleting ? "RELEASED" : "DISABLED_RELEASED");
       org.mockito.Mockito.verify(hertzBeatClient, org.mockito.Mockito.never())
           .syncMonitor(any(), any(Integer.class), org.mockito.ArgumentMatchers.eq(false));
+      org.mockito.Mockito.verify(hertzBeatClient, org.mockito.Mockito.never()).deleteMonitor(501L);
     } finally { commitOwner.countDown(); }
   }
 
@@ -205,7 +262,95 @@ class MonitoringMigrationPostgresTest {
     return new DisabledFixture(asset, plan, task);
   }
 
+  private DisabledFixture releaseFixture() {
+    DisabledFixture fixture = disabledFixture();
+    return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
+      InspectionPlan plan = plans.findByIdForUpdate(fixture.plan().getId()).orElseThrow();
+      plan.markDeleting();
+      InspectionPlanBinding binding = bindings.findCurrentForUpdate(plan.getId(), fixture.asset().getId()).orElseThrow();
+      binding.requestRelease(plan.getDesiredVersion());
+      MonitoringConfigTask task = tasks.saveAndFlush(new MonitoringConfigTask(plan.getId(), fixture.asset().getId(),
+          plan.getDesiredVersion(), "DELETE", LocalDateTime.now()));
+      return new DisabledFixture(fixture.asset(), plan, task);
+    });
+  }
+
+  @Test
+  void 删除清理预留期间接管必须等待清理提交() throws Exception {
+    DisabledFixture fixture = releaseFixture();
+    CountDownLatch deleting = new CountDownLatch(1);
+    CountDownLatch finishDelete = new CountDownLatch(1);
+    CountDownLatch claimingStarted = new CountDownLatch(1);
+    doAnswer(invocation -> {
+      deleting.countDown();
+      if (!finishDelete.await(20, TimeUnit.SECONDS)) throw new IllegalStateException("测试未释放删除");
+      return null;
+    }).when(hertzBeatClient).deleteMonitor(501L);
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var cleanup = executor.submit(() -> { sync.processTask(fixture.task().getId()); return true; });
+      assertThat(deleting.await(10, TimeUnit.SECONDS)).isTrue();
+      var claiming = executor.submit(() -> {
+        claimingStarted.countDown();
+        return policies.create(new com.lqbz.ops.web.InspectionPlanRequest("清理后接管", fixture.plan().getProjectId(),
+            fixture.plan().getProjectName(), null, null, "ENABLED", null, 60, 2, "CRITICAL",
+            java.util.List.of(fixture.asset().getId()), "MONITORING"));
+      });
+      try {
+        assertThat(claimingStarted.await(10, TimeUnit.SECONDS)).isTrue();
+        boolean blocked = false;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!blocked && System.nanoTime() < deadline) {
+          blocked = Boolean.TRUE.equals(jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+                  + "AND wait_event_type='Lock' AND wait_event='advisory')", Boolean.class));
+          if (!blocked) Thread.sleep(20);
+        }
+        assertThat(blocked).isTrue();
+        assertThat(claiming.isDone()).isFalse();
+      } finally { finishDelete.countDown(); }
+      assertThat(cleanup.get(30, TimeUnit.SECONDS)).isTrue();
+      var owner = claiming.get(30, TimeUnit.SECONDS);
+      assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get()
+          .extracting(InspectionPlanBinding::getPlanId).isEqualTo(owner.id());
+      assertThat(plans.findById(fixture.plan().getId()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+      assertThat(assets.findById(fixture.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+      org.mockito.Mockito.verify(hertzBeatClient).deleteMonitor(501L);
+    } finally { finishDelete.countDown(); }
+  }
+
   private record DisabledFixture(Asset asset, InspectionPlan plan, MonitoringConfigTask task) {}
+
+  @Test
+  void 两个停用计划并发清理共享Monitor时最后引用必须完成实际删除() throws Exception {
+    DisabledFixture first = releaseFixture();
+    DisabledFixture second = new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
+      InspectionPlan plan = InspectionPlan.monitoring("PG共享清理", first.plan().getProjectId(),
+          first.plan().getProjectName(), 60, 2, "CRITICAL");
+      plan.configureStatus("DISABLED");
+      plans.save(plan);
+      InspectionPlanBinding binding = InspectionPlanBinding.managed(plan.getId(), first.asset().getId(), 1L);
+      binding.markSynchronized(501L, 602L, false, LocalDateTime.now());
+      binding.releaseDisabledOwnership();
+      plan.markDeleting();
+      binding.requestRelease(plan.getDesiredVersion());
+      bindings.saveAndFlush(binding);
+      MonitoringConfigTask task = tasks.saveAndFlush(new MonitoringConfigTask(plan.getId(), first.asset().getId(),
+          plan.getDesiredVersion(), "DELETE", LocalDateTime.now()));
+      return new DisabledFixture(first.asset(), plan, task);
+    });
+    CountDownLatch start = new CountDownLatch(1);
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var firstCleanup = executor.submit(() -> { start.await(); sync.processTask(first.task().getId()); return true; });
+      var secondCleanup = executor.submit(() -> { start.await(); sync.processTask(second.task().getId()); return true; });
+      start.countDown();
+      assertThat(firstCleanup.get(30, TimeUnit.SECONDS)).isTrue();
+      assertThat(secondCleanup.get(30, TimeUnit.SECONDS)).isTrue();
+    }
+    org.mockito.Mockito.verify(hertzBeatClient).deleteMonitor(501L);
+    assertThat(assets.findById(first.asset().getId()).orElseThrow().getHertzbeatMonitorId()).isNull();
+    assertThat(plans.findById(first.plan().getId()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+    assertThat(plans.findById(second.plan().getId()).orElseThrow().getLifecycleStatus()).isEqualTo("DELETED");
+  }
 
   @Test
   void 确认快照检查后并发修改资产必须等待确认提交() throws Exception {
