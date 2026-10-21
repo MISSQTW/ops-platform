@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, Settings, ShieldCheck, Trash2, XCircle } from '@lucide/vue'
 import { api, setAuthToken, type Alert, type AlertHandlingEvent, type Asset, type Inspection, type InspectionItem, type InspectionPlan, type MonitoringDetails, type MonitoringSyncRun, type Project, type Summary } from './api'
+import MonitoringMigrationPanel from './MonitoringMigrationPanel.vue'
 
 type ViewKey = 'dashboard' | 'projects' | 'assets' | 'inspections' | 'alerts'
 type AssetCategoryKey = 'server' | 'database' | 'middleware' | 'interfaceStorage'
@@ -22,6 +23,8 @@ const projects = ref<Project[]>([])
 const assets = ref<Asset[]>([])
 const inspections = ref<Inspection[]>([])
 const inspectionPlans = ref<InspectionPlan[]>([])
+const migrationVisible = ref(false)
+const migrationServiceId = ref<number | null>(null)
 const inspectionItems = ref<InspectionItem[]>([])
 const inspectionSection = ref<'plans' | 'results'>('plans')
 const selectedInspectionPlan = ref<InspectionPlan | null>(null)
@@ -300,7 +303,7 @@ function statusText(status: string) {
     RUNNING: '运行中', UP: '可用', DOWN: '不可用', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
     PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', CLOSED: '已关闭', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '状态未知',
     ENABLED: '已启用', DISABLED: '已停用', SYNCED: '已同步', NOT_SYNCED: '未同步', SYNCING: '同步中', PARTIAL: '部分成功',
-    NOTE_ADDED: '添加备注', REOPENED: '新周期重开',
+    NOTE_ADDED: '添加备注', REOPENED: '新周期重开', PENDING_CONFIRMATION: '待确认迁移',
   }
   return mapping[status] ?? status
 }
@@ -409,6 +412,41 @@ function openCreate() {
     Object.assign(planForm, { name: '', projectId: project?.id || 0, projectName: project?.name || '', status: 'ENABLED', intervalValue: 5, intervalUnit: '分钟', failureThreshold: 2, alertLevel: 'CRITICAL', assetIds: [] })
   }
   editorVisible.value = true
+}
+
+function currentServicePlan(asset: Asset) {
+  return inspectionPlans.value.find(plan => plan.status === 'ENABLED' && plan.lifecycleStatus === 'ACTIVE'
+    && plan.projectName === asset.projectName && plan.assetIds.includes(asset.id))
+}
+
+function openAssetPlanConfiguration(asset: Asset) {
+  const project = projects.value.find(item => item.name === asset.projectName)
+  if (!project) {
+    ElMessage.warning('请先补齐服务所属项目档案')
+    return
+  }
+  const current = currentServicePlan(asset)
+  const pending = inspectionPlans.value.find(plan => plan.status === 'PENDING_CONFIRMATION'
+    && plan.lifecycleStatus === 'ACTIVE' && plan.assetIds.includes(asset.id))
+  monitoringDrawerVisible.value = false
+  navigateTo('inspections')
+  if (current) openPlanEdit(current)
+  else if (pending || asset.hertzbeatMonitorId || inspectionPlans.value.some(plan => !plan.projectId
+    && plan.projectName === asset.projectName && plan.status === 'ENABLED')) openMigrationCenter(asset.id)
+  else {
+    openCreate()
+    Object.assign(planForm, { projectId: project.id, projectName: project.name, assetIds: [asset.id] })
+  }
+}
+
+function configureFirstUnplannedService() {
+  const asset = filteredAssets.value.find(item => !currentServicePlan(item))
+  if (asset) openAssetPlanConfiguration(asset)
+}
+
+function openMigrationCenter(serviceId: number | null = null) {
+  migrationServiceId.value = serviceId
+  migrationVisible.value = true
 }
 
 function openProjectEdit(item: Project) {
@@ -729,21 +767,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
 
       <section v-else class="content list-view">
         <div v-if="activeView !== 'inspections'" class="list-summary"><span>当前共 {{ activeView === 'projects' ? filteredProjects.length : activeView === 'assets' ? filteredAssets.length : filteredAlerts.length }} 条记录</span><div class="legend"><i class="ok" />正常<i class="warn" />注意<i class="bad" />异常</div></div>
-        <el-alert v-if="activeView === 'assets' && filteredAssets.some(asset => !inspectionPlans.some(plan => plan.status === 'ENABLED' && plan.assetIds.includes(asset.id)))" type="info" :closable="false">
+        <el-alert v-if="activeView === 'assets' && filteredAssets.some(asset => !currentServicePlan(asset))" type="info" :closable="false">
           <template #title>部分服务未配置启用的巡检计划，请前往巡检中心配置。</template>
-          <el-button link type="primary" @click="navigateTo('inspections')">配置巡检计划</el-button>
+          <el-button link type="primary" @click="configureFirstUnplannedService">配置首个未纳管服务</el-button>
         </el-alert>
 
         <div v-if="activeView === 'projects'" class="project-grid">
           <article v-for="item in filteredProjects" :key="item.id" class="project-card" @click="openProjectDetail(item)"><div class="project-head"><div class="project-symbol">{{ item.name.slice(0, 1) }}</div><div class="card-actions"><el-tag :type="badge(item.status)" effect="light">{{ statusText(item.status) }}</el-tag><button title="编辑项目" @click.stop="openProjectEdit(item)"><Pencil :size="15" /></button><button title="删除项目" class="danger-action" @click.stop="removeProject(item)"><Trash2 :size="15" /></button></div></div><h3>{{ item.name }}</h3><p>{{ item.description }}</p><div class="project-meta"><span>{{ item.projectType || '业务系统' }}</span><strong>{{ item.owner }}</strong></div><div class="project-footer"><button @click.stop="openProjectServices(item)"><Server :size="14" />{{ assets.filter(asset => asset.projectName === item.name).length }} 项服务<ChevronRight :size="14" /></button><button @click.stop="openProjectAlerts(item)"><AlertTriangle :size="14" />{{ alerts.filter(alert => (alert.projectNameSnapshot || alert.projectName) === item.name && alert.handlingStatus === 'OPEN').length }} 个告警<ChevronRight :size="14" /></button></div></article>
         </div>
 
-        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column label="所属计划" min-width="160"><template #default="scope">{{ inspectionPlans.find(plan => plan.assetIds.includes(scope.row.id) && plan.lifecycleStatus !== 'DELETED')?.name || '未配置' }}</template></el-table-column><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="120" /><el-table-column label="运行状态" width="120"><template #default="scope"><div class="asset-status"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag><span v-if="scope.row.monitoringStale">{{ scope.row.lastCollectedAt ? '数据已陈旧' : '暂无采样' }}</span></div></template></el-table-column><el-table-column label="监控状态" width="150"><template #default="scope"><el-tooltip :content="scope.row.monitoringError || scope.row.syncMessage || '请在巡检计划中配置监控'" placement="top"><div class="sync-state"><el-tag :type="scope.row.mappingStatus === 'MANAGED' ? 'success' : scope.row.mappingStatus === 'INVALIDATED' ? 'danger' : 'info'" effect="light">{{ scope.row.mappingStatus === 'MANAGED' ? 'HertzBeat 管理' : scope.row.mappingStatus === 'INVALIDATED' ? '映射失效' : '未配置' }}</el-tag><span>{{ currentAssetAlerts(scope.row).length }} 个当前告警</span></div></el-tooltip></template></el-table-column><el-table-column label="操作" width="130" fixed="right"><template #default="scope"><div class="row-actions"><button title="监控详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
+        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column label="所属计划" min-width="160"><template #default="scope">{{ currentServicePlan(scope.row)?.name || '未配置启用计划' }}</template></el-table-column><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="120" /><el-table-column label="运行状态" width="120"><template #default="scope"><div class="asset-status"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag><span v-if="scope.row.monitoringStale">{{ scope.row.lastCollectedAt ? '数据已陈旧' : '暂无采样' }}</span></div></template></el-table-column><el-table-column label="监控状态" width="150"><template #default="scope"><el-tooltip :content="scope.row.monitoringError || scope.row.syncMessage || '请在巡检计划中配置监控'" placement="top"><div class="sync-state"><el-tag :type="scope.row.mappingStatus === 'MANAGED' ? 'success' : scope.row.mappingStatus === 'INVALIDATED' ? 'danger' : 'info'" effect="light">{{ scope.row.mappingStatus === 'MANAGED' ? 'HertzBeat 管理' : scope.row.mappingStatus === 'INVALIDATED' ? '映射失效' : '未配置' }}</el-tag><span>{{ currentAssetAlerts(scope.row).length }} 个当前告警</span></div></el-tooltip></template></el-table-column><el-table-column label="操作" width="130" fixed="right"><template #default="scope"><div class="row-actions"><button title="监控详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
 
         <div v-if="activeView === 'inspections'" class="inspection-center">
           <div class="inspection-view-heading"><div class="inspection-heading-title"><button v-if="inspectionSection === 'results' && selectedInspectionPlan" class="records-back" title="返回巡检计划" @click="backToPlans"><ArrowLeft :size="18" /></button><div><h2>{{ inspectionSection === 'plans' ? '巡检计划列表' : selectedInspectionPlan ? `${selectedInspectionPlan.name} · 执行记录` : '执行记录' }}</h2><p v-if="inspectionSection === 'plans'">配置巡检周期并管理自动执行任务</p></div></div></div>
+          <div v-if="inspectionSection === 'plans'" class="migration-toolbar"><el-button @click="openMigrationCenter()">存量监控迁移</el-button></div>
           <div v-if="inspectionSection === 'plans'" class="plan-grid">
-            <article v-for="plan in inspectionPlans" :key="plan.id" class="plan-card"><div class="plan-card-head"><div class="plan-icon"><CalendarClock :size="19" /></div><div class="plan-state-tags"><el-tag :type="plan.status === 'ENABLED' ? 'success' : 'info'" effect="light">{{ statusText(plan.status) }}</el-tag><el-tag :type="plan.projectId ? plan.syncStatus === 'SYNCED' ? 'success' : plan.syncStatus === 'FAILED' || plan.syncStatus === 'PARTIAL' ? 'danger' : 'warning' : 'info'" effect="plain">{{ plan.projectId ? statusText(plan.syncStatus || 'NOT_SYNCED') : '待迁移' }}</el-tag></div></div><h3>{{ plan.name }}</h3><p>{{ plan.projectId ? `${plan.assetIds.length} 项服务 · 连续失败 ${plan.failureThreshold || 1} 次触发${statusText(plan.alertLevel || 'CRITICAL')}告警` : '旧巡检计划只保留历史执行兼容，迁移后由 HertzBeat 执行' }}</p><dl><div><dt>所属项目</dt><dd>{{ plan.projectName }}</dd></div><div><dt>监控频率</dt><dd>{{ plan.scheduleText }}</dd></div><div><dt>最近同步</dt><dd>{{ plan.lastSyncSucceededAt ? formatTime(plan.lastSyncSucceededAt) : '尚未成功' }}</dd></div><div><dt>最近校验</dt><dd>{{ plan.lastVerifiedAt ? formatTime(plan.lastVerifiedAt) : '尚未校验' }}</dd></div></dl><el-alert v-if="plan.syncError" :title="plan.syncError" type="warning" :closable="false" /><div class="plan-actions"><div class="plan-commands"><button v-if="plan.projectId" title="手动同步到 HertzBeat" :disabled="syncingPlanId === plan.id" @click="syncPlan(plan)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingPlanId === plan.id }" /></button><button title="执行记录" @click="openPlanRecords(plan)"><Clock3 :size="15" /></button><button v-if="plan.projectId" class="plan-toggle-button" :class="plan.status === 'ENABLED' ? 'stop' : 'start'" :title="plan.status === 'ENABLED' ? '停用计划' : '启用计划'" @click="togglePlan(plan)"><Power :size="15" /></button></div><div><button v-if="plan.projectId" title="编辑计划" @click="openPlanEdit(plan)"><Pencil :size="15" /></button><button title="删除计划" class="danger-action" @click="removePlan(plan)"><Trash2 :size="15" /></button></div></div></article>
+            <article v-for="plan in inspectionPlans.filter(item => item.lifecycleStatus !== 'DELETED')" :key="plan.id" class="plan-card"><div class="plan-card-head"><div class="plan-icon"><CalendarClock :size="19" /></div><div class="plan-state-tags"><el-tag :type="plan.status === 'ENABLED' ? 'success' : 'info'" effect="light">{{ statusText(plan.status) }}</el-tag><el-tag :type="plan.projectId ? plan.syncStatus === 'SYNCED' ? 'success' : plan.syncStatus === 'FAILED' || plan.syncStatus === 'PARTIAL' ? 'danger' : 'warning' : 'info'" effect="plain">{{ plan.projectId ? statusText(plan.syncStatus || 'NOT_SYNCED') : '待迁移' }}</el-tag></div></div><h3>{{ plan.name }}</h3><p>{{ plan.projectId ? `${plan.assetIds.length} 项服务 · 连续失败 ${plan.failureThreshold || 1} 次触发${statusText(plan.alertLevel || 'CRITICAL')}告警` : '旧巡检计划只保留历史执行兼容，迁移后由 HertzBeat 执行' }}</p><dl><div><dt>所属项目</dt><dd>{{ plan.projectName }}</dd></div><div><dt>监控频率</dt><dd>{{ plan.scheduleText }}</dd></div><div><dt>最近同步</dt><dd>{{ plan.lastSyncSucceededAt ? formatTime(plan.lastSyncSucceededAt) : '尚未成功' }}</dd></div><div><dt>最近校验</dt><dd>{{ plan.lastVerifiedAt ? formatTime(plan.lastVerifiedAt) : '尚未校验' }}</dd></div></dl><el-alert v-if="plan.syncError" :title="plan.syncError" type="warning" :closable="false" /><div class="plan-actions"><div class="plan-commands"><button v-if="plan.projectId && plan.status !== 'PENDING_CONFIRMATION'" title="手动同步到 HertzBeat" :disabled="syncingPlanId === plan.id" @click="syncPlan(plan)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingPlanId === plan.id }" /></button><button v-if="plan.status === 'PENDING_CONFIRMATION'" title="确认或取消迁移" @click="openMigrationCenter(plan.assetIds[0] ?? null)"><CheckCircle2 :size="15" /></button><button title="执行记录" @click="openPlanRecords(plan)"><Clock3 :size="15" /></button><button v-if="plan.projectId && plan.status !== 'PENDING_CONFIRMATION'" class="plan-toggle-button" :class="plan.status === 'ENABLED' ? 'stop' : 'start'" :title="plan.status === 'ENABLED' ? '停用计划' : '启用计划'" @click="togglePlan(plan)"><Power :size="15" /></button></div><div><button v-if="plan.projectId && plan.status !== 'PENDING_CONFIRMATION'" title="编辑计划" @click="openPlanEdit(plan)"><Pencil :size="15" /></button><button v-if="plan.status !== 'PENDING_CONFIRMATION'" title="删除计划" class="danger-action" @click="removePlan(plan)"><Trash2 :size="15" /></button></div></div></article>
             <div v-if="inspectionPlans.length === 0" class="empty-state plan-empty"><CalendarClock :size="26" /><strong>暂无巡检计划</strong><span>新增计划后可统一管理巡检范围和执行周期。</span></div>
           </div>
           <div v-else class="result-list">
@@ -824,7 +863,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
         <template v-if="monitoringDetails">
           <div class="monitoring-summary"><div><span>运行状态</span><strong>{{ statusText(monitoringDetails.asset.status) }}</strong></div><div><span>监控 ID</span><strong>{{ monitoringDetails.asset.hertzbeatMonitorId || '--' }}</strong></div><div><span>最近采集</span><strong>{{ monitoringDetails.asset.lastCollectedAt ? formatTime(monitoringDetails.asset.lastCollectedAt) : '--' }}</strong></div></div>
           <div class="monitoring-summary"><div><span>监控类型</span><strong>{{ monitoringDetails.asset.type }}</strong></div><div><span>最近同步尝试</span><strong>{{ monitoringDetails.asset.lastSyncAttemptAt ? formatTime(monitoringDetails.asset.lastSyncAttemptAt) : '尚未尝试' }}</strong></div><div><span>最近同步成功</span><strong>{{ monitoringDetails.asset.lastSuccessfulSyncAt ? formatTime(monitoringDetails.asset.lastSuccessfulSyncAt) : '尚未成功' }}</strong></div></div>
-          <div class="monitoring-summary"><div><span>所属巡检计划</span><strong>{{ inspectionPlans.find(plan => plan.assetIds.includes(monitoringDetails!.asset.id) && plan.lifecycleStatus !== 'DELETED')?.name || '未配置' }}</strong></div><div><span>当前告警</span><strong>{{ currentAssetAlerts(monitoringDetails!.asset).length }} 个</strong></div><div><span>配置入口</span><strong>巡检中心</strong></div></div>
+          <div class="monitoring-summary"><div><span>所属巡检计划</span><strong>{{ currentServicePlan(monitoringDetails!.asset)?.name || '未配置启用计划' }}</strong></div><div><span>当前告警</span><strong>{{ currentAssetAlerts(monitoringDetails!.asset).length }} 个</strong></div><div><span>配置入口</span><el-button link type="primary" @click="openAssetPlanConfiguration(monitoringDetails!.asset)">配置巡检计划</el-button></div></div>
           <el-alert v-if="monitoringDetails.asset.monitoringError" :title="monitoringDetails.asset.monitoringError" type="warning" :closable="false" show-icon />
           <el-alert v-if="!monitoringDetails.metricsCollectedAt" title="暂无指标采样；服务可用性以监控状态为准" type="info" :closable="false" show-icon />
           <el-alert v-else-if="monitoringDetails.metricsStale" title="当前指标超过 180 秒未更新，数据已陈旧" type="warning" :closable="false" show-icon />
@@ -846,5 +885,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
         <section class="alert-history"><h3>处置历史</h3><el-timeline v-if="alertEvents.length"><el-timeline-item v-for="event in alertEvents" :key="event.id" :timestamp="formatRecordTime(event.occurredAt)" placement="top"><strong>{{ statusText(event.action) }}</strong><p>{{ event.operatorName }}<template v-if="event.note"> · {{ event.note }}</template></p><small>{{ statusText(event.fromStatus) }} → {{ statusText(event.toStatus) }}</small></el-timeline-item></el-timeline><div v-else class="empty-trend">暂无处置记录</div></section>
       </div>
     </el-drawer>
+    <MonitoringMigrationPanel v-model="migrationVisible" :projects="projects" :service-id="migrationServiceId" @changed="loadData" />
   </div>
 </template>
