@@ -56,7 +56,12 @@ public class InspectionExecutionService {
     InspectionPlan plan = plans.findById(planId)
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     Inspection inspection = execute(plan, false);
-    if (inspection == null) throw new IllegalStateException("计划内服务已由 HertzBeat 执行周期巡检，请使用地址测试");
+    if (inspection == null) {
+      if (assets.findByProjectNameOrderById(plan.getProjectName()).isEmpty()) {
+        throw new IllegalStateException("计划所属项目没有可执行服务，请先添加服务");
+      }
+      throw new IllegalStateException("计划内服务已由 HertzBeat 执行周期巡检，请使用地址测试");
+    }
     return inspection;
   }
 
@@ -73,7 +78,7 @@ public class InspectionExecutionService {
   private Inspection execute(InspectionPlan plan, boolean scheduled) {
     long startedAt = System.nanoTime();
     List<Asset> projectAssets = localExecutionAssets(plan);
-    if (plan.isMonitoringPolicy() && projectAssets.isEmpty()) {
+    if (projectAssets.isEmpty()) {
       if (scheduled) plan.scheduleNextRun(calculateNextRun(plan.getScheduleText(), LocalDateTime.now()));
       return null;
     }
@@ -98,7 +103,12 @@ public class InspectionExecutionService {
 
   private List<Asset> localExecutionAssets(InspectionPlan plan) {
     List<Asset> projectAssets = assets.findByProjectNameOrderById(plan.getProjectName());
-    if (!plan.isMonitoringPolicy()) return projectAssets;
+    if (!plan.isMonitoringPolicy()) {
+      return projectAssets.stream().filter(asset -> !bindings.findByActiveOwnerKey(asset.getId())
+          .flatMap(binding -> plans.findById(binding.getPlanId())
+              .map(owner -> binding.isHertzBeatReady(owner.getDesiredVersion())))
+          .orElse(false)).toList();
+    }
     Map<Long, InspectionPlanBinding> planBindings = bindings.findByPlanIdOrderById(plan.getId()).stream()
         .filter(binding -> !"RELEASED".equals(binding.getOwnershipStatus()))
         .collect(Collectors.toMap(InspectionPlanBinding::getAssetId, Function.identity(), (left, right) -> right));

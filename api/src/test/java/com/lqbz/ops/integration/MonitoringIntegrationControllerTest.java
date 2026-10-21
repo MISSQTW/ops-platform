@@ -1,43 +1,37 @@
 package com.lqbz.ops.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
-import com.lqbz.ops.domain.Asset;
 import com.lqbz.ops.domain.AssetRepository;
 import com.lqbz.ops.domain.MonitoringSyncRunRepository;
-import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 class MonitoringIntegrationControllerTest {
   @Test
-  void 资产同步接口应返回最新同步状态() {
-    HertzBeatClient client = mock(HertzBeatClient.class);
+  void 单服务旧同步入口必须拒绝配置写入() {
     AssetMonitoringSyncService syncService = mock(AssetMonitoringSyncService.class);
-    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
-    asset.markSynced(321L, "同步成功");
-    when(syncService.sync(1L)).thenReturn(asset);
-
-    MonitoringIntegrationController controller = controller(client, syncService);
-
-    assertThat(controller.syncAsset(1L).getHertzbeatMonitorId()).isEqualTo(321L);
+    assertThatThrownBy(() -> controller(syncService).syncAsset(1L))
+        .isInstanceOfSatisfying(ResponseStatusException.class, exception ->
+            assertThat(exception.getStatusCode().value()).isEqualTo(410));
+    verifyNoInteractions(syncService);
   }
 
   @Test
-  void 一键同步接口应返回汇总结果() {
-    HertzBeatClient client = mock(HertzBeatClient.class);
+  void 批量服务旧同步入口必须拒绝配置写入() {
     AssetMonitoringSyncService syncService = mock(AssetMonitoringSyncService.class);
-    when(syncService.syncAll()).thenReturn(new AssetMonitoringSyncService.SyncAllResult(3, 2, 1, List.of()));
-
-    MonitoringIntegrationController controller = controller(client, syncService);
-
-    assertThat(controller.syncAllAssets().succeeded()).isEqualTo(2);
-    assertThat(controller.syncAllAssets().failed()).isEqualTo(1);
+    assertThatThrownBy(() -> controller(syncService).syncAllAssets())
+        .isInstanceOfSatisfying(ResponseStatusException.class, exception ->
+            assertThat(exception.getStatusCode().value()).isEqualTo(410));
+    verifyNoInteractions(syncService);
   }
 
-  private MonitoringIntegrationController controller(HertzBeatClient client, AssetMonitoringSyncService syncService) {
-    return new MonitoringIntegrationController(client, syncService, mock(MonitoringSyncCoordinator.class),
-        mock(MonitoringSyncRunRepository.class), mock(AssetRepository.class), mock(MonitoringMetricsService.class));
+  private MonitoringIntegrationController controller(AssetMonitoringSyncService syncService) {
+    return new MonitoringIntegrationController(mock(HertzBeatClient.class), syncService,
+        mock(MonitoringSyncCoordinator.class), mock(MonitoringSyncRunRepository.class),
+        mock(AssetRepository.class), mock(MonitoringMetricsService.class));
   }
 }

@@ -37,10 +37,16 @@ public class MonitoringIntegrationController {
   public HertzBeatClient.Status hertzBeatStatus() { return hertzBeatClient.status(); }
 
   @PostMapping("/hertzbeat/assets/{id}/sync")
-  public Asset syncAsset(@PathVariable Long id) { return syncService.sync(id); }
+  public Asset syncAsset(@PathVariable Long id) {
+    throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
+        "服务同步入口已停用，请在巡检计划中保存或手动同步监控配置");
+  }
 
   @PostMapping("/hertzbeat/assets/sync-all")
-  public AssetMonitoringSyncService.SyncAllResult syncAllAssets() { return syncService.syncAll(); }
+  public AssetMonitoringSyncService.SyncAllResult syncAllAssets() {
+    throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
+        "批量服务同步入口已停用，请使用巡检计划同步");
+  }
 
   @PostMapping("/hertzbeat/monitoring/sync")
   public MonitoringSyncRun syncMonitoringData() { return monitoringSyncCoordinator.run("MANUAL"); }

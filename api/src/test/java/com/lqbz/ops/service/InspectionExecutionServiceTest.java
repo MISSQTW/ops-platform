@@ -82,6 +82,42 @@ class InspectionExecutionServiceTest {
   }
 
   @Test
+  void 空项目手动执行应明确提示没有服务() {
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    AssetRepository assets = mock(AssetRepository.class);
+    InspectionPlan plan = new InspectionPlan("空计划", "空系统", "全部", "每 1 分钟", "ENABLED", LocalDateTime.now());
+    when(plans.findById(1L)).thenReturn(java.util.Optional.of(plan));
+    when(assets.findByProjectNameOrderById("空系统")).thenReturn(List.of());
+    InspectionExecutionService execution = new InspectionExecutionService(plans, assets,
+        mock(InspectionRepository.class), mock(InspectionItemRepository.class), mock(InspectionPlanBindingRepository.class));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> execution.execute(1L))
+        .isInstanceOf(IllegalStateException.class).hasMessage("计划所属项目没有可执行服务，请先添加服务");
+  }
+
+  @Test
+  void 旧计划应排除已被新计划完整接管的服务() {
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    AssetRepository assets = mock(AssetRepository.class);
+    InspectionRepository inspections = mock(InspectionRepository.class);
+    InspectionItemRepository items = mock(InspectionItemRepository.class);
+    InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
+    InspectionPlan legacy = new InspectionPlan("旧计划", "支付系统", "全部服务", "每 1 分钟", "ENABLED", LocalDateTime.now());
+    InspectionPlan owner = monitoringPlan(11L);
+    Asset asset = asset(21L, "UNKNOWN");
+    InspectionPlanBinding binding = InspectionPlanBinding.managed(11L, 21L, owner.getDesiredVersion());
+    binding.markSynchronized(31L, 41L, true, LocalDateTime.now());
+    when(plans.findByStatusAndNextRunAtLessThanEqualOrderByNextRunAt(any(), any())).thenReturn(List.of(legacy));
+    when(assets.findByProjectNameOrderById("支付系统")).thenReturn(List.of(asset));
+    when(bindings.findByActiveOwnerKey(21L)).thenReturn(java.util.Optional.of(binding));
+    when(plans.findById(11L)).thenReturn(java.util.Optional.of(owner));
+
+    new InspectionExecutionService(plans, assets, inspections, items, bindings).executeDuePlans();
+
+    verify(inspections, never()).save(any());
+    verify(items, never()).save(any());
+  }
+
+  @Test
   void 同步失败服务应继续本地周期检查避免监控空窗() {
     InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
     AssetRepository assets = mock(AssetRepository.class);
