@@ -60,7 +60,9 @@ public class InspectionPlan {
   public Long getProjectId() { return projectId; }
   public String getProjectName() { return projectName; }
   public String getScopeText() { return scopeText; }
-  public String getScheduleText() { return scheduleText; }
+  public String getScheduleText() {
+    return isMonitoringPolicy() ? "每 " + intervalSeconds + " 秒" : scheduleText;
+  }
   public String getStatus() { return status; }
   public LocalDateTime getNextRunAt() { return nextRunAt; }
   public Integer getIntervalSeconds() { return intervalSeconds; }
