@@ -35,6 +35,26 @@ HertzBeat 执行正式采集和告警计算。平台默认每 60 秒回流状态
 
 VictoriaMetrics 作为独立时序组件部署；当前 Compose 未配置 HertzBeat 到 VictoriaMetrics 的写入连接，不能仅凭容器启动推断指标已写入该组件。
 
+## 服务采集与告警契约
+
+| 服务类型 | HertzBeat app | 默认端口 | 可用性含义 |
+| --- | --- | --- | --- |
+| HTTP | website | HTTP 80 / HTTPS 443 | 配置的路径与查询参数可完成 HTTP 采集 |
+| SERVER | port | 22 | TCP 端口可连接 |
+| MYSQL | port | 3306 | TCP 端口可连接 |
+| POSTGRESQL | port | 5432 | TCP 端口可连接 |
+| REDIS | port | 6379 | TCP 端口可连接 |
+| KAFKA | port | 9092 | TCP 端口可连接 |
+| RABBITMQ | port | 5672 | TCP 端口可连接 |
+| ROCKETMQ | port | 9876 | TCP 端口可连接 |
+| MINIO | port | 9000 | TCP 端口可连接 |
+
+显式端口覆盖默认值。未知类型禁止进入启用计划；HTTP 地址必须包含 http/https 协议。非 HTTP 类型的端口可用只证明连接建立，不证明数据库查询、缓存命令、消息收发或对象读写正常。
+
+上述两种 app 的 summary 均是 priority 0 采集，可用性由本机 HertzBeat `MetricsRealTimeAlertCalculator` 将采集结果映射为 `__available__=up/down`。连接失败、HTTP 采集错误或 6000ms 超时会进入 down；恢复成功采集进入 up。未收到采集数据时没有新的计算事件，平台保留最后状态并展示陈旧提示，不据此伪造故障或恢复。连续失败次数由同一规则的 times 控制，成功采集清除待触发累计；Monitor 重建产生新实例 ID，规则改绑新实例，从新计数开始，旧告警仍等待外部明确恢复事件。
+
+规则类型必须为 `realtime_metric`，表达式必须同时限定 app、Monitor 实例 ID 和 down。计划间隔控制 Monitor intervals；配置一致性比较 host、port、uri（含查询参数）、ssl、timeout，并在下发后回读确认。HTTP 和端口契约分别有真实故障/恢复闭环证据，所有 port 类型共用同一采集与告警实现。
+
 ## 错误处理
 
 API 对参数错误返回 `400`，资源不存在返回 `404`，内部错误返回统一 JSON 错误结构。前端在接口不可用时显示明确错误状态。

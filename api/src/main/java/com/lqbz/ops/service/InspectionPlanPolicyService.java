@@ -65,6 +65,8 @@ public class InspectionPlanPolicyService {
     InspectionPlan plan = InspectionPlan.monitoring(request.name(), project.getId(), project.getName(),
         request.intervalSeconds(), request.failureThreshold(), request.alertLevel());
     plan.configureStatus(requireStatus(valueOr(request.status(), "ENABLED")));
+    if ("ENABLED".equals(plan.getStatus())) selected.forEach(asset ->
+        com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint()));
     plans.save(plan);
     for (Long assetId : assetIds) {
       InspectionPlanBinding binding = InspectionPlanBinding.managed(plan.getId(), assetId, plan.getDesiredVersion());
@@ -86,6 +88,8 @@ public class InspectionPlanPolicyService {
     }
     List<Long> assetIds = requireAssets(project, request.assetIds());
     String requestedStatus = requireStatus(valueOr(request.status(), plan.getStatus()));
+    if ("ENABLED".equals(requestedStatus)) assets.findAllById(assetIds).forEach(asset ->
+        com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint()));
     List<InspectionPlanBinding> existing = bindings.findByPlanIdOrderById(plan.getId());
     if ("ENABLED".equals(requestedStatus) && "DISABLED".equals(plan.getStatus())) {
       List<Long> conflicts = existing.stream()
@@ -161,6 +165,7 @@ public class InspectionPlanPolicyService {
       if (!"ACTIVE".equals(plan.getLifecycleStatus()) || !"ENABLED".equals(plan.getStatus())) {
         throw new IllegalArgumentException("只能认领到启用中的巡检计划");
       }
+      com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint());
       if (asset.getHertzbeatMonitorId() == null) throw new IllegalArgumentException("服务没有可认领的 HertzBeat Monitor");
       if (assets.countByHertzbeatMonitorId(asset.getHertzbeatMonitorId()) != 1) {
         throw new IllegalArgumentException("Monitor 不能唯一证明服务归属，禁止认领");
@@ -190,6 +195,9 @@ public class InspectionPlanPolicyService {
     }
     asset.update(name, projectName, valueOr(environmentName, asset.getEnvironmentName()), type, endpoint,
         valueOr(status, asset.getStatus()));
+    if (lockedPlan != null && "ENABLED".equals(lockedPlan.getStatus())) {
+      com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint());
+    }
     for (InspectionPlanBinding binding : affectedBindings) {
       if ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())) continue;
       InspectionPlan plan = lockedPlan;

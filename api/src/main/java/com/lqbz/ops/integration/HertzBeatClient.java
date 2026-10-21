@@ -493,6 +493,8 @@ public class HertzBeatClient {
   }
 
   private MonitorTarget monitorTarget(Asset asset) {
+    com.lqbz.ops.domain.MonitoringServiceContract contract =
+        com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint());
     URI endpoint = URI.create(asset.getEndpoint().contains("://") ? asset.getEndpoint() : "tcp://" + asset.getEndpoint());
     String host = endpoint.getHost();
     if (host == null || host.isBlank()) throw new IllegalArgumentException("服务连接地址无法识别");
@@ -505,23 +507,13 @@ public class HertzBeatClient {
           param("host", host, 1), param("port", String.valueOf(port), 0), param("uri", uri, 1),
           param("ssl", String.valueOf(ssl), 2), param("timeout", "6000", 0)));
     }
-    int port = endpoint.getPort() > 0 ? endpoint.getPort() : defaultPort(asset.getType());
+    int port = endpoint.getPort() > 0 ? endpoint.getPort() : contract.defaultPort();
     return new MonitorTarget("port", host + ":" + port, List.of(
         param("host", host, 1), param("port", String.valueOf(port), 0), param("timeout", "6000", 0)));
   }
 
   private Map<String, Object> param(String field, String value, int type) {
     return Map.of("field", field, "paramValue", value, "type", type);
-  }
-
-  private int defaultPort(String type) {
-    return switch (type.toUpperCase()) {
-      case "SERVER" -> 22;
-      case "MYSQL" -> 3306;
-      case "POSTGRESQL" -> 5432;
-      case "REDIS" -> 6379;
-      default -> throw new IllegalArgumentException("暂不支持同步该服务类型：" + type);
-    };
   }
 
   private long elapsedMillis(long startedAt) { return Math.max(1, Duration.ofNanos(System.nanoTime() - startedAt).toMillis()); }

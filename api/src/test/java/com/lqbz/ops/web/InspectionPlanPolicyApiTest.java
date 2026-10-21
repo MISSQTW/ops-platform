@@ -30,6 +30,19 @@ class InspectionPlanPolicyApiTest {
   @Autowired private InspectionPlanBindingRepository bindings;
 
   @Test
+  void 未知类型即使提供端口也不能加入启用计划() throws Exception {
+    long projectId = createProject("类型准入系统");
+    var response = mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(Map.of("name", "未知类型服务", "projectName", "类型准入系统",
+            "type", "UNKNOWN", "endpoint", "localhost:1234"))))
+        .andExpect(status().isCreated()).andReturn();
+    long assetId = objectMapper.readTree(response.getResponse().getContentAsString()).path("id").asLong();
+    mockMvc.perform(post("/api/inspection-plans").contentType(MediaType.APPLICATION_JSON)
+        .content(monitoringPlanBody("拒绝未知类型", projectId, "类型准入系统", List.of(assetId))))
+        .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value("服务类型没有有效监控契约：UNKNOWN"));
+  }
+
+  @Test
   void 应创建绑定服务的监控计划() throws Exception {
     long projectId = createProject("策略测试系统");
     long assetId = createAsset("策略测试接口", "策略测试系统");
