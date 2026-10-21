@@ -84,7 +84,7 @@ class InspectionCenterTest {
   }
 
   @Test
-  void 应支持立即执行巡检计划并生成结果() throws Exception {
+  void 无服务计划手动执行应提示配置而不是生成空巡检记录() throws Exception {
     MvcResult created = mockMvc.perform(post("/api/inspection-plans")
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(Map.of(
@@ -98,13 +98,40 @@ class InspectionCenterTest {
 
     long id = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
     mockMvc.perform(post("/api/inspection-plans/{id}/execute", id))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.name").value("无资产项目巡检"))
-        .andExpect(jsonPath("$.status").value("FAILED"))
-        .andExpect(jsonPath("$.totalChecks").value(0));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.message").value("计划所属项目没有可执行服务，请先添加服务"));
 
+    mockMvc.perform(get("/api/inspections"))
+        .andExpect(jsonPath("$[*].name", not(hasItem("无资产项目巡检"))));
     mockMvc.perform(get("/api/audits"))
-        .andExpect(jsonPath("$[*].action", hasItem("EXECUTE_INSPECTION_PLAN")));
+        .andExpect(jsonPath("$[?(@.action == 'EXECUTE_INSPECTION_PLAN')].resourceName", not(hasItem("无资产项目巡检"))));
+  }
+
+  @Test
+  void 有服务计划手动执行应生成逐项结果和审计记录() throws Exception {
+    String projectName = "手动执行验证系统";
+    mockMvc.perform(post("/api/projects").contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(Map.of("name", projectName, "owner", "负责人", "description", "执行测试"))))
+        .andExpect(status().isCreated());
+    mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(Map.of("name", "手动执行接口", "projectName", projectName,
+            "type", "HTTP", "endpoint", "http://127.0.0.1:1/health"))))
+        .andExpect(status().isCreated());
+    MvcResult created = mockMvc.perform(post("/api/inspection-plans").contentType(MediaType.APPLICATION_JSON)
+        .content(objectMapper.writeValueAsString(Map.of("name", "手动执行验证计划", "projectName", projectName,
+            "scopeText", "全部服务", "scheduleText", "每 1 分钟", "nextRunAt", "2099-01-01T12:00:00"))))
+        .andExpect(status().isCreated()).andReturn();
+    long id = objectMapper.readTree(created.getResponse().getContentAsString()).path("id").asLong();
+
+    MvcResult result = mockMvc.perform(post("/api/inspection-plans/{id}/execute", id))
+        .andExpect(status().isCreated()).andExpect(jsonPath("$.name").value("手动执行验证计划"))
+        .andExpect(jsonPath("$.totalChecks").value(1)).andExpect(jsonPath("$.status").value("FAILED")).andReturn();
+    long inspectionId = objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asLong();
+    mockMvc.perform(get("/api/inspections/{id}/items", inspectionId))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].status").value("FAILED"));
+    mockMvc.perform(get("/api/audits"))
+        .andExpect(jsonPath("$[?(@.action == 'EXECUTE_INSPECTION_PLAN')].resourceName", hasItem("手动执行验证计划")));
   }
 
   @Test
