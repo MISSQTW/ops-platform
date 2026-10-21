@@ -2,13 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, Settings, ShieldCheck, Trash2, XCircle } from '@lucide/vue'
-import { api, setAuthToken, type Alert, type AlertHandlingEvent, type Asset, type Inspection, type InspectionItem, type InspectionPlan, type MonitoringDetails, type MonitoringSyncRun, type Project, type Summary } from './api'
-import MonitoringMigrationPanel from './MonitoringMigrationPanel.vue'
+import { api, setAuthToken, type Alert, type AlertHandlingEvent, type Asset, type Inspection, type InspectionItem, type InspectionPlan, type MonitoringDetails, type Project, type Summary } from './api'
+import { useRoute, useRouter } from 'vue-router'
+import type { ViewKey } from './router'
+import { presentServiceState } from './serviceState'
 
-type ViewKey = 'dashboard' | 'projects' | 'assets' | 'inspections' | 'alerts'
 type AssetCategoryKey = 'server' | 'database' | 'middleware' | 'interfaceStorage'
 
-const activeView = ref<ViewKey>('dashboard')
+const route = useRoute()
+const router = useRouter()
+const activeView = ref<ViewKey>(route.name === 'inspection-records' ? 'inspections' : route.name as ViewKey || 'dashboard')
 const authenticated = ref(false)
 const authLoading = ref(true)
 const loginLoading = ref(false)
@@ -17,17 +20,16 @@ const loginForm = reactive({ username: 'admin', password: '' })
 const loading = ref(true)
 const error = ref('')
 const keyword = ref('')
-const lastUpdated = ref('')
 const summary = ref<Summary>({ projectCount: 0, assetCount: 0, abnormalAssetCount: 0, openAlertCount: 0, inspectionPassRate: 0 })
 const projects = ref<Project[]>([])
 const assets = ref<Asset[]>([])
 const inspections = ref<Inspection[]>([])
 const inspectionPlans = ref<InspectionPlan[]>([])
-const migrationVisible = ref(false)
-const migrationServiceId = ref<number | null>(null)
+const visibleInspectionPlans = computed(() => inspectionPlans.value.filter(item => item.lifecycleStatus !== 'DELETED'))
 const inspectionItems = ref<InspectionItem[]>([])
 const inspectionSection = ref<'plans' | 'results'>('plans')
-const selectedInspectionPlan = ref<InspectionPlan | null>(null)
+const selectedInspectionPlanId = ref<number | null>(null)
+const selectedInspectionPlan = computed(() => inspectionPlans.value.find(plan => plan.id === selectedInspectionPlanId.value) || null)
 const inspectionPage = ref(1)
 const inspectionPageSize = 10
 const inspectionDrawerVisible = ref(false)
@@ -61,6 +63,7 @@ const serviceCategory = ref<AssetCategoryKey | null>(null)
 const pendingAlertsOnly = ref(false)
 const hertzBeatConnected = ref(false)
 const editorVisible = ref(false)
+const resumeEditorAfterLogin = ref(false)
 const editorMode = ref<'project' | 'asset' | 'plan'>('project')
 const editingId = ref<number | null>(null)
 const saving = ref(false)
@@ -68,7 +71,6 @@ const runningPlanId = ref<number | null>(null)
 const syncingPlanId = ref<number | null>(null)
 const syncingAllPlans = ref(false)
 const syncingMonitoring = ref(false)
-const monitoringRuns = ref<MonitoringSyncRun[]>([])
 const monitoringDrawerVisible = ref(false)
 const monitoringDetailLoading = ref(false)
 const monitoringDetails = ref<MonitoringDetails | null>(null)
@@ -99,6 +101,13 @@ const titles: Record<ViewKey, { title: string; description: string }> = {
   alerts: { title: '告警事件', description: '集中处理异常事件并持续跟踪恢复状态' },
 }
 
+const searchPlaceholder = computed(() => {
+  if (activeView.value === 'projects') return '搜索项目'
+  if (activeView.value === 'assets') return '搜索服务'
+  if (activeView.value === 'inspections' && inspectionSection.value === 'results') return '搜索执行记录'
+  if (activeView.value === 'alerts') return '搜索告警'
+  return ''
+})
 const filteredProjects = computed(() => projects.value.filter(item => includesKeyword(item.name, item.owner, item.description)))
 const activeServiceCategory = computed(() => assetCategories.find(item => item.key === serviceCategory.value) || null)
 const healthyStatuses = new Set(['UP', 'HEALTHY'])
@@ -111,6 +120,10 @@ const assetCategoryStats = computed(() => assetCategories.map(category => {
   return { ...category, count: categoryAssets.length, healthy, percentage: categoryAssets.length ? (healthy / categoryAssets.length) * 100 : 0 }
 }))
 const currentTitle = computed(() => {
+  if (activeView.value === 'inspections' && inspectionSection.value === 'results') return {
+    title: selectedInspectionPlan.value ? `${selectedInspectionPlan.value.name} · 执行记录` : '执行记录',
+    description: '查看巡检结果与检查详情',
+  }
   if (activeView.value === 'assets' && selectedProjectName.value) return { title: `${selectedProjectName.value} · 服务管理`, description: '查看和维护当前项目接入的运行服务' }
   if (activeView.value === 'alerts' && selectedProjectName.value) return { title: `${selectedProjectName.value} · 告警事件`, description: '查看当前项目产生的运行告警' }
   if (activeView.value === 'assets' && serviceListMode.value === 'abnormal') return { title: '异常服务', description: '查看需要持续关注的运行服务' }
@@ -125,7 +138,7 @@ const selectedProjectAlerts = computed(() => selectedProject.value ? alerts.valu
 const planIntervalMin = computed(() => planForm.intervalUnit === '秒' ? 10 : 1)
 const planIntervalMax = computed(() => planForm.intervalUnit === '小时' ? 24 : planForm.intervalUnit === '分钟' ? 1440 : 86400)
 const filteredInspections = computed(() => inspections.value.filter(item => includesKeyword(item.name, item.projectName)))
-const selectedPlanInspections = computed(() => filteredInspections.value.filter(item => !selectedInspectionPlan.value || (item.name === selectedInspectionPlan.value.name && item.projectName === selectedInspectionPlan.value.projectName)))
+const selectedPlanInspections = computed(() => filteredInspections.value.filter(item => !selectedInspectionPlanId.value || (selectedInspectionPlan.value && item.name === selectedInspectionPlan.value.name && item.projectName === selectedInspectionPlan.value.projectName)))
 const pagedPlanInspections = computed(() => selectedPlanInspections.value.slice((inspectionPage.value - 1) * inspectionPageSize, inspectionPage.value * inspectionPageSize))
 const filteredAlerts = computed(() => {
   const severityOrder: Record<string, number> = { CRITICAL: 0, WARNING: 1, INFO: 2 }
@@ -180,12 +193,13 @@ function navigateTo(view: ViewKey) {
   serviceCategory.value = null
   pendingAlertsOnly.value = false
   if (view === 'inspections') {
-    selectedInspectionPlan.value = null
+    selectedInspectionPlanId.value = null
     inspectionPage.value = 1
     inspectionSection.value = 'plans'
   }
   keyword.value = ''
 }
+
 
 function openProjectServices(item: Project) {
   selectedProjectName.value = item.name
@@ -218,7 +232,7 @@ function backToProjects() {
 }
 
 function backFromList() {
-  if (activeView.value === 'assets' && serviceCategory.value) {
+  if (globalListSource.value || (activeView.value === 'assets' && serviceCategory.value)) {
     backToDashboard()
     return
   }
@@ -264,7 +278,7 @@ function openGlobalAlertList() {
 }
 
 function openGlobalInspections() {
-  selectedInspectionPlan.value = null
+  selectedInspectionPlanId.value = null
   inspectionPage.value = 1
   inspectionSection.value = 'results'
   globalListSource.value = true
@@ -274,7 +288,7 @@ function openGlobalInspections() {
 
 function backToDashboard() {
   selectedProjectName.value = ''
-  selectedInspectionPlan.value = null
+  selectedInspectionPlanId.value = null
   inspectionPage.value = 1
   inspectionSection.value = 'plans'
   globalListSource.value = false
@@ -303,7 +317,7 @@ function statusText(status: string) {
     RUNNING: '运行中', UP: '可用', DOWN: '不可用', MAINTENANCE: '维护中', HEALTHY: '正常', WARNING: '注意', CRITICAL: '异常',
     PASSED: '通过', FAILED: '失败', OPEN: '待处理', ACKNOWLEDGED: '已确认', CLOSED: '已关闭', FIRING: '告警中', RESOLVED: '已恢复', INFO: '提示', UNKNOWN: '状态未知',
     ENABLED: '已启用', DISABLED: '已停用', SYNCED: '已同步', NOT_SYNCED: '未同步', SYNCING: '同步中', PARTIAL: '部分成功',
-    NOTE_ADDED: '添加备注', REOPENED: '新周期重开', PENDING_CONFIRMATION: '待确认迁移',
+    NOTE_ADDED: '添加备注', REOPENED: '新周期重开',
   }
   return mapping[status] ?? status
 }
@@ -330,13 +344,11 @@ async function loadData() {
     inspectionPlans.value = planData
     alerts.value = alertData
     try {
-      const [hertzBeatStatus, runData] = await Promise.all([api.hertzBeatStatus(), api.monitoringRuns()])
+      const hertzBeatStatus = await api.hertzBeatStatus()
       hertzBeatConnected.value = hertzBeatStatus.connected
-      monitoringRuns.value = runData
     } catch {
       hertzBeatConnected.value = false
     }
-    lastUpdated.value = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date())
   } catch (reason) {
     if (reason instanceof Error && reason.message === 'AUTH_REQUIRED') {
       setAuthToken('')
@@ -372,6 +384,10 @@ async function login() {
     authenticated.value = true
     loginForm.password = ''
     await loadData()
+    if (authenticated.value && resumeEditorAfterLogin.value) {
+      editorVisible.value = true
+      resumeEditorAfterLogin.value = false
+    }
   } catch (reason) {
     ElMessage.error(reason instanceof Error && reason.message !== 'AUTH_REQUIRED' ? reason.message : '用户名或密码错误')
   } finally {
@@ -415,8 +431,46 @@ function openCreate() {
 }
 
 function currentServicePlan(asset: Asset) {
-  return inspectionPlans.value.find(plan => plan.status === 'ENABLED' && plan.lifecycleStatus === 'ACTIVE'
+  return inspectionPlans.value.find(plan => plan.lifecycleStatus === 'ACTIVE'
     && plan.projectName === asset.projectName && plan.assetIds.includes(asset.id))
+}
+
+function serviceState(asset: Asset) {
+  return presentServiceState(asset, currentServicePlan(asset)?.intervalSeconds || 0)
+}
+
+function planCheckSummary(plan: InspectionPlan) {
+  const services = assets.value.filter(asset => plan.assetIds.includes(asset.id))
+  const record = inspections.value.find(item => item.name === plan.name && item.projectName === plan.projectName)
+  const sampleTimes = services.map(asset => asset.lastCollectedAt).filter((time): time is string => Boolean(time))
+  const latestSample = sampleTimes.sort((first, second) => new Date(second).getTime() - new Date(first).getTime())[0]
+  const useRecord = record && (!latestSample || new Date(record.executedAt).getTime() >= new Date(latestSample).getTime())
+  const lastCheckedAt = useRecord ? record.executedAt : latestSample
+  const states = services.map(serviceState)
+  const result = useRecord ? (record.status === 'PASSED' ? '正常' : '异常')
+    : states.some(state => state.text === '异常') ? '异常'
+      : states.length && states.every(state => state.text === '正常') ? '正常' : lastCheckedAt ? '待更新' : '尚未检查'
+  const interval = plan.intervalSeconds
+  const frequency = interval ? interval % 3600 === 0 ? `每 ${interval / 3600} 小时`
+    : interval % 60 === 0 ? `每 ${interval / 60} 分钟` : `每 ${interval} 秒` : plan.scheduleText
+  let nextCheck = '等待首次检查'
+  if (plan.status !== 'ENABLED') nextCheck = '已停用'
+  else if (plan.syncStatus === 'FAILED' || plan.syncStatus === 'PARTIAL') nextCheck = '配置异常'
+  else if (interval) {
+    const candidates = services.filter(asset => asset.lastCollectedAt)
+      .map(asset => new Date(asset.lastCollectedAt!).getTime() + interval * 1000)
+    const nextTime = candidates.length ? Math.min(...candidates) : null
+    if (nextTime) nextCheck = nextTime > Date.now() ? `预计 ${formatRecordTime(new Date(nextTime).toISOString())}` : '等待执行'
+  } else if (plan.nextRunAt) nextCheck = formatRecordTime(plan.nextRunAt)
+  return { frequency, lastChecked: lastCheckedAt ? formatRecordTime(lastCheckedAt) : '尚未检查', result, nextCheck }
+}
+
+function serviceInspectionConfiguration(asset: Asset) {
+  if (asset.mappingStatus === 'INVALIDATED' || asset.syncStatus === 'FAILED' || asset.monitoringError) return { text: '配置异常', type: 'danger' }
+  const plan = visibleInspectionPlans.value.find(item => item.projectName === asset.projectName && item.assetIds.includes(asset.id))
+  if (!plan) return { text: '未配置', type: 'info' }
+  if (plan.syncStatus === 'FAILED' || plan.syncStatus === 'PARTIAL') return { text: '配置异常', type: 'danger' }
+  return { text: '已配置', type: 'success' }
 }
 
 function openAssetPlanConfiguration(asset: Asset) {
@@ -426,27 +480,13 @@ function openAssetPlanConfiguration(asset: Asset) {
     return
   }
   const current = currentServicePlan(asset)
-  const pending = inspectionPlans.value.find(plan => plan.status === 'PENDING_CONFIRMATION'
-    && plan.lifecycleStatus === 'ACTIVE' && plan.assetIds.includes(asset.id))
   monitoringDrawerVisible.value = false
   navigateTo('inspections')
   if (current) openPlanEdit(current)
-  else if (pending || asset.hertzbeatMonitorId || inspectionPlans.value.some(plan => !plan.projectId
-    && plan.projectName === asset.projectName && plan.status === 'ENABLED')) openMigrationCenter(asset.id)
   else {
     openCreate()
     Object.assign(planForm, { projectId: project.id, projectName: project.name, assetIds: [asset.id] })
   }
-}
-
-function configureFirstUnplannedService() {
-  const asset = filteredAssets.value.find(item => !currentServicePlan(item))
-  if (asset) openAssetPlanConfiguration(asset)
-}
-
-function openMigrationCenter(serviceId: number | null = null) {
-  migrationServiceId.value = serviceId
-  migrationVisible.value = true
 }
 
 function openProjectEdit(item: Project) {
@@ -508,7 +548,15 @@ async function saveEditor() {
     editorVisible.value = false
     await loadData()
   } catch (reason) {
-    ElMessage.error(reason instanceof Error ? reason.message : '保存失败')
+    if (reason instanceof Error && reason.message === 'AUTH_REQUIRED') {
+      resumeEditorAfterLogin.value = true
+      editorVisible.value = false
+      setAuthToken('')
+      authenticated.value = false
+      ElMessage.warning('登录已失效，请重新登录；已保留填写内容，登录后可继续保存')
+    } else {
+      ElMessage.error(reason instanceof Error ? reason.message : '保存失败')
+    }
   } finally {
     saving.value = false
   }
@@ -533,7 +581,7 @@ async function syncPlan(plan: InspectionPlan) {
   syncingPlanId.value = plan.id
   try {
     const result = await api.syncInspectionPlan(plan.id)
-    result.status === 'SYNCED' ? ElMessage.success('巡检计划已同步到 HertzBeat') : ElMessage.warning(result.error || `同步状态：${result.status}`)
+    result.status === 'SYNCED' ? ElMessage.success('巡检配置已更新') : ElMessage.warning('配置更新未完成，请检查计划配置')
     await loadData()
   } catch (reason) {
     ElMessage.error(reason instanceof Error ? reason.message : '巡检计划同步失败')
@@ -649,49 +697,129 @@ async function togglePlan(item: InspectionPlan) {
 
 async function removePlan(item: InspectionPlan) {
   await ElMessageBox.confirm(`确认删除巡检计划“${item.name}”？`, '删除巡检计划', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
-  if (item.projectId) await api.deleteInspectionPlan(item.id)
-  else await api.deleteLegacyInspectionPlan(item.id)
+  await api.deleteInspectionPlan(item.id)
   ElMessage.success('巡检计划已删除')
   await loadData()
 }
 
 async function executePlan(item: InspectionPlan) {
+  if (runningPlanId.value !== null) return
   runningPlanId.value = item.id
   try {
     const result = await api.executeInspectionPlan(item.id)
     ElMessage.success(result.status === 'PASSED' ? '巡检执行完成，全部检查通过' : '巡检执行完成，发现异常项')
-    selectedInspectionPlan.value = item
-    inspectionPage.value = 1
-    inspectionSection.value = 'results'
     await loadData()
+    openPlanRecords(item)
   } catch (reason) {
-    ElMessage.error(reason instanceof Error ? reason.message : '巡检执行失败')
+    if (reason instanceof Error && reason.message === 'AUTH_REQUIRED') {
+      setAuthToken('')
+      authenticated.value = false
+      ElMessage.warning('登录已失效，请重新登录后执行')
+    } else {
+      ElMessage.error(reason instanceof Error ? reason.message : '巡检执行失败')
+    }
   } finally {
     runningPlanId.value = null
   }
 }
 
 function openPlanRecords(item: InspectionPlan) {
-  selectedInspectionPlan.value = item
+  keyword.value = ''
+  selectedInspectionPlanId.value = item.id
   inspectionPage.value = 1
   inspectionSection.value = 'results'
 }
 
 function backToPlans() {
-  selectedInspectionPlan.value = null
+  selectedInspectionPlanId.value = null
   inspectionPage.value = 1
   inspectionSection.value = 'plans'
+  keyword.value = ''
 }
 
+let restoringPage = false
+let restoredPageKey = ''
+
+function pageLocation() {
+  const records = activeView.value === 'inspections' && inspectionSection.value === 'results'
+  const query: Record<string, string> = {}
+  const add = (key: string, value: string, fallback = '') => { if (value && value !== fallback) query[key] = value }
+  add('q', keyword.value)
+  if (activeView.value === 'assets' || activeView.value === 'alerts') {
+    add('project', selectedProjectName.value)
+    add('from', globalListSource.value ? 'overview' : '')
+  }
+  if (activeView.value === 'assets') {
+    add('status', serviceListMode.value, 'all')
+    add('category', serviceCategory.value || '')
+  }
+  if (activeView.value === 'alerts') {
+    add('pending', pendingAlertsOnly.value ? '1' : '')
+    add('external', alertExternalFilter.value, 'ALL')
+    add('handling', alertHandlingFilter.value, 'ALL')
+    add('level', alertLevelFilter.value)
+    add('alertProject', alertProjectFilter.value)
+    add('plan', alertPlanFilter.value)
+    add('asset', alertAssetFilter.value)
+    add('start', alertTimeRange.value?.[0] || '')
+    add('end', alertTimeRange.value?.[1] || '')
+  }
+  if (records && inspectionPage.value > 1) add('page', String(inspectionPage.value))
+  return {
+    name: records ? 'inspection-records' : activeView.value,
+    params: records && selectedInspectionPlanId.value ? { planId: String(selectedInspectionPlanId.value) } : {},
+    query,
+  }
+}
+
+function restorePageFromRoute() {
+  restoringPage = true
+  const value = (key: string) => typeof route.query[key] === 'string' ? route.query[key] as string : ''
+  activeView.value = route.name === 'inspection-records' ? 'inspections' : route.name as ViewKey || 'dashboard'
+  inspectionSection.value = route.name === 'inspection-records' ? 'results' : 'plans'
+  const planId = Number(route.params.planId)
+  selectedInspectionPlanId.value = Number.isSafeInteger(planId) && planId > 0 ? planId : null
+  const page = Number(value('page'))
+  inspectionPage.value = Number.isSafeInteger(page) && page > 0 ? page : 1
+  keyword.value = value('q')
+  selectedProjectName.value = value('project')
+  globalListSource.value = value('from') === 'overview'
+  serviceListMode.value = value('status') === 'abnormal' ? 'abnormal' : 'all'
+  serviceCategory.value = assetCategories.find(item => item.key === value('category'))?.key || null
+  pendingAlertsOnly.value = value('pending') === '1'
+  alertExternalFilter.value = value('external') || 'ALL'
+  alertHandlingFilter.value = value('handling') || 'ALL'
+  alertLevelFilter.value = value('level')
+  alertProjectFilter.value = value('alertProject')
+  alertPlanFilter.value = value('plan')
+  alertAssetFilter.value = value('asset')
+  alertTimeRange.value = value('start') && value('end') ? [value('start'), value('end')] : null
+  restoredPageKey = JSON.stringify(pageLocation())
+  restoringPage = false
+}
+
+watch(() => route.fullPath, restorePageFromRoute, { immediate: true, flush: 'sync' })
+watch(pageLocation, location => {
+  const key = JSON.stringify(location)
+  if (key === restoredPageKey) return
+  restoredPageKey = key
+  const contextChanged = location.name !== route.name || (location.params.planId || '') !== (route.params.planId || '')
+    || ['project', 'from', 'status', 'category', 'pending'].some(field => (location.query[field] || '') !== (route.query[field] || ''))
+  if (contextChanged) void router.push(location)
+  else void router.replace(location)
+}, { flush: 'post' })
+
 watch(keyword, () => {
-  if (activeView.value === 'inspections' && inspectionSection.value === 'results') inspectionPage.value = 1
-})
+  if (!restoringPage && activeView.value === 'inspections' && inspectionSection.value === 'results') inspectionPage.value = 1
+}, { flush: 'sync' })
 
 onMounted(() => {
   window.addEventListener('resize', updateViewportWidth)
   initializeAuth()
 })
-onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportWidth)
+})
 </script>
 
 <template>
@@ -723,14 +851,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
 
     <main class="main-area">
       <header class="topbar">
-        <div class="topbar-title"><button v-if="((activeView === 'assets' || activeView === 'alerts') && selectedProjectName) || (activeView === 'assets' && serviceCategory)" class="records-back" :title="serviceCategory ? '返回运行总览' : '返回项目中心'" @click="backFromList"><ArrowLeft :size="18" /></button><div><h1>{{ currentTitle.title }}</h1><p>{{ currentTitle.description }}</p></div></div>
+        <div class="topbar-title"><button v-if="activeView === 'inspections' && inspectionSection === 'results'" class="records-back" title="返回巡检计划" aria-label="返回巡检计划" @click="backToPlans"><ArrowLeft :size="18" /></button><button v-if="((activeView === 'assets' || activeView === 'alerts') && selectedProjectName) || (activeView === 'assets' && globalListSource)" class="records-back" :title="globalListSource ? '返回运行总览' : '返回项目中心'" :aria-label="globalListSource ? '返回运行总览' : '返回项目中心'" @click="backFromList"><ArrowLeft :size="18" /></button><div><h1>{{ currentTitle.title }}</h1></div></div>
         <div class="topbar-actions">
-          <div class="search"><Search :size="17" /><input v-model="keyword" placeholder="搜索当前视图" /></div>
-          <span class="updated">更新于 {{ lastUpdated || '--:--:--' }}</span>
-          <button class="icon-button" title="刷新数据" :disabled="loading" @click="loadData"><RefreshCw :size="17" :class="{ spinning: loading }" /></button>
-          <button v-if="activeView === 'alerts'" class="secondary-button" title="从 HertzBeat 拉取最新运行状态和告警，更新平台中的监控数据" :disabled="syncingMonitoring" @click="syncMonitoringData"><Activity :size="16" :class="{ 'spin-icon': syncingMonitoring }" />同步监控数据</button>
-          <button v-if="activeView === 'inspections' && inspectionSection === 'plans'" class="secondary-button" title="将全部巡检计划配置同步到 HertzBeat" :disabled="syncingAllPlans" @click="syncAllPlans"><RefreshCw :size="16" :class="{ 'spin-icon': syncingAllPlans }" />同步全部计划</button>
-          <button v-if="activeView === 'projects' || activeView === 'assets' || (activeView === 'inspections' && inspectionSection === 'plans')" class="primary-button" @click="openCreate"><Plus :size="16" />新增{{ activeView === 'projects' ? '项目' : activeView === 'assets' ? '服务' : '计划' }}</button>
+          <div v-if="searchPlaceholder" class="search"><Search :size="17" /><input v-model="keyword" :placeholder="searchPlaceholder" /></div>
+          <button v-if="activeView === 'alerts'" class="secondary-button" title="更新服务状态和告警" :disabled="syncingMonitoring" @click="syncMonitoringData"><Activity :size="16" :class="{ 'spin-icon': syncingMonitoring }" />同步监控数据</button>
+          <button v-if="activeView === 'inspections' && inspectionSection === 'plans' && visibleInspectionPlans.length > 0" class="secondary-button" title="更新全部巡检配置" :disabled="syncingAllPlans" @click="syncAllPlans"><RefreshCw :size="16" :class="{ 'spin-icon': syncingAllPlans }" />同步全部计划</button>
+          <button v-if="activeView === 'projects' || activeView === 'assets' || (activeView === 'inspections' && inspectionSection === 'plans')" class="primary-button" @click="openCreate"><Plus :size="16" />新增{{ activeView === 'projects' ? '项目' : activeView === 'assets' ? '服务' : '巡检计划' }}</button>
         </div>
       </header>
 
@@ -738,11 +864,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
 
       <section v-if="activeView === 'dashboard'" class="content dashboard-view">
         <div class="metrics-grid">
-          <button class="metric" @click="openGlobalProjects"><div class="metric-icon blue"><FolderKanban :size="20" /></div><div><span>接入项目</span><strong>{{ summary.projectCount }}</strong><small>统一业务视图</small></div><ChevronRight :size="16" class="metric-arrow" /></button>
-          <button class="metric" @click="openGlobalServices('all')"><div class="metric-icon green"><Server :size="20" /></div><div><span>纳管服务</span><strong>{{ summary.assetCount }}</strong><small>统一服务视图</small></div><ChevronRight :size="16" class="metric-arrow" /></button>
-          <button class="metric" @click="openGlobalServices('abnormal')"><div class="metric-icon amber"><HardDrive :size="20" /></div><div><span>异常服务</span><strong>{{ summary.abnormalAssetCount }}</strong><small>需要持续关注</small></div><ChevronRight :size="16" class="metric-arrow" /></button>
-          <button class="metric" @click="openGlobalAlerts"><div class="metric-icon red"><BellRing :size="20" /></div><div><span>待处理告警</span><strong>{{ summary.openAlertCount }}</strong><small>尚未恢复</small></div><ChevronRight :size="16" class="metric-arrow" /></button>
-          <button class="metric" @click="openGlobalInspections"><div class="metric-icon cyan"><ListChecks :size="20" /></div><div><span>巡检通过率</span><strong>{{ summary.inspectionPassRate }}%</strong><small>执行记录</small></div><ChevronRight :size="16" class="metric-arrow" /></button>
+          <button class="metric" @click="openGlobalProjects"><div class="metric-icon blue"><FolderKanban :size="20" /></div><div><span>接入项目</span><strong>{{ summary.projectCount }}</strong></div><ChevronRight :size="16" class="metric-arrow" /></button>
+          <button class="metric" @click="openGlobalServices('all')"><div class="metric-icon green"><Server :size="20" /></div><div><span>纳管服务</span><strong>{{ summary.assetCount }}</strong></div><ChevronRight :size="16" class="metric-arrow" /></button>
+          <button class="metric" @click="openGlobalServices('abnormal')"><div class="metric-icon amber"><HardDrive :size="20" /></div><div><span>异常服务</span><strong>{{ summary.abnormalAssetCount }}</strong></div><ChevronRight :size="16" class="metric-arrow" /></button>
+          <button class="metric" @click="openGlobalAlerts"><div class="metric-icon red"><BellRing :size="20" /></div><div><span>待处理告警</span><strong>{{ summary.openAlertCount }}</strong></div><ChevronRight :size="16" class="metric-arrow" /></button>
+          <button class="metric" @click="openGlobalInspections"><div class="metric-icon cyan"><ListChecks :size="20" /></div><div><span>巡检通过率</span><strong>{{ inspections.length ? `${summary.inspectionPassRate}%` : '--' }}</strong><small>执行记录</small></div><ChevronRight :size="16" class="metric-arrow" /></button>
         </div>
 
         <div class="dashboard-grid">
@@ -755,7 +881,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
           </section>
 
           <section class="panel"><div class="panel-heading"><div><h2>巡检质量</h2><p>最近三次任务</p></div></div>
-            <div class="pass-ring"><div><strong>{{ summary.inspectionPassRate }}%</strong><span>通过率</span></div></div>
+            <div class="pass-ring" :style="{ background: `conic-gradient(#27ad79 0 ${inspections.length ? summary.inspectionPassRate : 0}%, #e8edeb 0 100%)` }"><div><strong>{{ inspections.length ? `${summary.inspectionPassRate}%` : '--' }}</strong><span>{{ inspections.length ? '通过率' : '暂无执行记录' }}</span></div></div>
             <div class="mini-list"><div v-for="item in inspections.slice(0, 3)" :key="item.id"><span class="dot" :class="item.status.toLowerCase()" /><div><strong>{{ item.name }}</strong><small>{{ item.passedChecks }}/{{ item.totalChecks }} 项通过</small></div></div></div>
           </section>
 
@@ -766,39 +892,49 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
       </section>
 
       <section v-else class="content list-view">
-        <div v-if="activeView !== 'inspections'" class="list-summary"><span>当前共 {{ activeView === 'projects' ? filteredProjects.length : activeView === 'assets' ? filteredAssets.length : filteredAlerts.length }} 条记录</span><div class="legend"><i class="ok" />正常<i class="warn" />注意<i class="bad" />异常</div></div>
-        <el-alert v-if="activeView === 'assets' && filteredAssets.some(asset => !currentServicePlan(asset))" type="info" :closable="false">
-          <template #title>部分服务未配置启用的巡检计划，请前往巡检中心配置。</template>
-          <el-button link type="primary" @click="configureFirstUnplannedService">配置首个未纳管服务</el-button>
-        </el-alert>
-
+        <div v-if="activeView !== 'inspections'" class="list-summary"><span>当前共 {{ activeView === 'projects' ? filteredProjects.length : activeView === 'assets' ? filteredAssets.length : filteredAlerts.length }} 条记录</span></div>
+        <div v-if="activeView === 'projects' && !filteredProjects.length" class="page-empty"><FolderKanban :size="26" /><strong>{{ keyword ? '未找到项目' : '暂无项目' }}</strong></div>
         <div v-if="activeView === 'projects'" class="project-grid">
           <article v-for="item in filteredProjects" :key="item.id" class="project-card" @click="openProjectDetail(item)"><div class="project-head"><div class="project-symbol">{{ item.name.slice(0, 1) }}</div><div class="card-actions"><el-tag :type="badge(item.status)" effect="light">{{ statusText(item.status) }}</el-tag><button title="编辑项目" @click.stop="openProjectEdit(item)"><Pencil :size="15" /></button><button title="删除项目" class="danger-action" @click.stop="removeProject(item)"><Trash2 :size="15" /></button></div></div><h3>{{ item.name }}</h3><p>{{ item.description }}</p><div class="project-meta"><span>{{ item.projectType || '业务系统' }}</span><strong>{{ item.owner }}</strong></div><div class="project-footer"><button @click.stop="openProjectServices(item)"><Server :size="14" />{{ assets.filter(asset => asset.projectName === item.name).length }} 项服务<ChevronRight :size="14" /></button><button @click.stop="openProjectAlerts(item)"><AlertTriangle :size="14" />{{ alerts.filter(alert => (alert.projectNameSnapshot || alert.projectName) === item.name && alert.handlingStatus === 'OPEN').length }} 个告警<ChevronRight :size="14" /></button></div></article>
         </div>
 
-        <div v-if="activeView === 'assets'" class="table-panel"><el-table :data="filteredAssets" stripe><el-table-column prop="name" label="服务名称" min-width="170" /><el-table-column prop="projectName" label="所属项目" min-width="150" /><el-table-column label="所属计划" min-width="160"><template #default="scope">{{ currentServicePlan(scope.row)?.name || '未配置启用计划' }}</template></el-table-column><el-table-column prop="environmentName" label="环境" width="90" /><el-table-column prop="type" label="服务类型" width="120" /><el-table-column label="运行状态" width="120"><template #default="scope"><div class="asset-status"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag><span v-if="scope.row.monitoringStale">{{ scope.row.lastCollectedAt ? '数据已陈旧' : '暂无采样' }}</span></div></template></el-table-column><el-table-column label="监控状态" width="150"><template #default="scope"><el-tooltip :content="scope.row.monitoringError || scope.row.syncMessage || '请在巡检计划中配置监控'" placement="top"><div class="sync-state"><el-tag :type="scope.row.mappingStatus === 'MANAGED' ? 'success' : scope.row.mappingStatus === 'INVALIDATED' ? 'danger' : 'info'" effect="light">{{ scope.row.mappingStatus === 'MANAGED' ? 'HertzBeat 管理' : scope.row.mappingStatus === 'INVALIDATED' ? '映射失效' : '未配置' }}</el-tag><span>{{ currentAssetAlerts(scope.row).length }} 个当前告警</span></div></el-tooltip></template></el-table-column><el-table-column label="操作" width="130" fixed="right"><template #default="scope"><div class="row-actions"><button title="监控详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column></el-table></div>
+        <div v-if="activeView === 'assets'" class="table-panel">
+          <el-table :data="filteredAssets" empty-text="暂无服务" stripe>
+            <el-table-column prop="name" label="服务名称" min-width="170" />
+            <el-table-column prop="projectName" label="所属项目" min-width="150" />
+            <el-table-column label="所属计划" min-width="160"><template #default="scope">{{ currentServicePlan(scope.row)?.name || '未加入计划' }}</template></el-table-column>
+            <el-table-column prop="environmentName" label="环境" width="90" />
+            <el-table-column prop="type" label="服务类型" width="120" />
+            <el-table-column label="服务状态" width="120"><template #default="scope"><el-tag :type="serviceState(scope.row).type" effect="light">{{ serviceState(scope.row).text }}</el-tag></template></el-table-column>
+            <el-table-column label="巡检配置" width="130"><template #default="scope"><el-tag :type="serviceInspectionConfiguration(scope.row).type" effect="light">{{ serviceInspectionConfiguration(scope.row).text }}</el-tag></template></el-table-column>
+            <el-table-column label="操作" width="250" fixed="right"><template #default="scope"><div class="service-row-actions"><el-button link type="primary" @click="openAssetPlanConfiguration(scope.row)">{{ currentServicePlan(scope.row) ? '查看巡检计划' : '新增巡检计划' }}</el-button><div class="row-actions"><button title="服务详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></div></template></el-table-column>
+          </el-table>
+        </div>
 
         <div v-if="activeView === 'inspections'" class="inspection-center">
-          <div class="inspection-view-heading"><div class="inspection-heading-title"><button v-if="inspectionSection === 'results' && selectedInspectionPlan" class="records-back" title="返回巡检计划" @click="backToPlans"><ArrowLeft :size="18" /></button><div><h2>{{ inspectionSection === 'plans' ? '巡检计划列表' : selectedInspectionPlan ? `${selectedInspectionPlan.name} · 执行记录` : '执行记录' }}</h2><p v-if="inspectionSection === 'plans'">配置巡检周期并管理自动执行任务</p></div></div></div>
-          <div v-if="inspectionSection === 'plans'" class="migration-toolbar"><el-button @click="openMigrationCenter()">存量监控迁移</el-button></div>
-          <div v-if="inspectionSection === 'plans'" class="plan-grid">
-            <article v-for="plan in inspectionPlans.filter(item => item.lifecycleStatus !== 'DELETED')" :key="plan.id" class="plan-card"><div class="plan-card-head"><div class="plan-icon"><CalendarClock :size="19" /></div><div class="plan-state-tags"><el-tag :type="plan.status === 'ENABLED' ? 'success' : 'info'" effect="light">{{ statusText(plan.status) }}</el-tag><el-tag :type="plan.projectId ? plan.syncStatus === 'SYNCED' ? 'success' : plan.syncStatus === 'FAILED' || plan.syncStatus === 'PARTIAL' ? 'danger' : 'warning' : 'info'" effect="plain">{{ plan.projectId ? statusText(plan.syncStatus || 'NOT_SYNCED') : '待迁移' }}</el-tag></div></div><h3>{{ plan.name }}</h3><p>{{ plan.projectId ? `${plan.assetIds.length} 项服务 · 连续失败 ${plan.failureThreshold || 1} 次触发${statusText(plan.alertLevel || 'CRITICAL')}告警` : '旧巡检计划只保留历史执行兼容，迁移后由 HertzBeat 执行' }}</p><dl><div><dt>所属项目</dt><dd>{{ plan.projectName }}</dd></div><div><dt>监控频率</dt><dd>{{ plan.scheduleText }}</dd></div><div><dt>最近同步</dt><dd>{{ plan.lastSyncSucceededAt ? formatTime(plan.lastSyncSucceededAt) : '尚未成功' }}</dd></div><div><dt>最近校验</dt><dd>{{ plan.lastVerifiedAt ? formatTime(plan.lastVerifiedAt) : '尚未校验' }}</dd></div></dl><el-alert v-if="plan.syncError" :title="plan.syncError" type="warning" :closable="false" /><div class="plan-actions"><div class="plan-commands"><button v-if="plan.projectId && plan.status !== 'PENDING_CONFIRMATION'" title="手动同步到 HertzBeat" :disabled="syncingPlanId === plan.id" @click="syncPlan(plan)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingPlanId === plan.id }" /></button><button v-if="plan.status === 'PENDING_CONFIRMATION'" title="确认或取消迁移" @click="openMigrationCenter(plan.assetIds[0] ?? null)"><CheckCircle2 :size="15" /></button><button title="执行记录" @click="openPlanRecords(plan)"><Clock3 :size="15" /></button><button v-if="plan.projectId && plan.status !== 'PENDING_CONFIRMATION'" class="plan-toggle-button" :class="plan.status === 'ENABLED' ? 'stop' : 'start'" :title="plan.status === 'ENABLED' ? '停用计划' : '启用计划'" @click="togglePlan(plan)"><Power :size="15" /></button></div><div><button v-if="plan.projectId && plan.status !== 'PENDING_CONFIRMATION'" title="编辑计划" @click="openPlanEdit(plan)"><Pencil :size="15" /></button><button v-if="plan.status !== 'PENDING_CONFIRMATION'" title="删除计划" class="danger-action" @click="removePlan(plan)"><Trash2 :size="15" /></button></div></div></article>
-            <div v-if="inspectionPlans.length === 0" class="empty-state plan-empty"><CalendarClock :size="26" /><strong>暂无巡检计划</strong><span>新增计划后可统一管理巡检范围和执行周期。</span></div>
+          <div v-if="inspectionSection === 'plans'" class="plan-grid" :class="{ 'is-empty': visibleInspectionPlans.length === 0 }">
+            <article v-for="plan in visibleInspectionPlans" :key="plan.id" class="plan-card"><div class="plan-card-head"><div class="plan-icon"><CalendarClock :size="19" /></div><div class="plan-state-tags"><el-tag :type="plan.status === 'ENABLED' ? 'success' : 'info'" effect="light">{{ statusText(plan.status) }}</el-tag><el-tag v-if="plan.syncStatus === 'FAILED' || plan.syncStatus === 'PARTIAL'" type="danger" effect="plain">配置异常</el-tag></div></div><h3>{{ plan.name }}</h3><p class="plan-service-summary"><span>{{ plan.assetIds.length }} 项服务</span><el-tooltip :content="`告警规则：连续检查失败 ${plan.failureThreshold || 1} 次后触发${statusText(plan.alertLevel || 'CRITICAL')}告警`" :trigger="['hover', 'focus']" placement="top"><button type="button" class="plan-rule-trigger" aria-label="查看告警规则"><BellRing :size="14" /></button></el-tooltip></p><dl><div><dt>所属项目</dt><dd>{{ plan.projectName }}</dd></div><div><dt>检查频率</dt><dd>{{ planCheckSummary(plan).frequency }}</dd></div><div><dt>最近检查</dt><dd>{{ planCheckSummary(plan).lastChecked }}</dd></div><div><dt>检查结果</dt><dd>{{ planCheckSummary(plan).result }}</dd></div><div><dt>下次巡检</dt><dd>{{ planCheckSummary(plan).nextCheck }}</dd></div></dl><div class="plan-actions"><div class="plan-commands"><button title="立即执行" aria-label="立即执行" :disabled="runningPlanId !== null || plan.status !== 'ENABLED' || plan.syncStatus !== 'SYNCED'" @click="executePlan(plan)"><RefreshCw v-if="runningPlanId === plan.id" :size="15" class="spin-icon" /><Play v-else :size="15" /></button><button title="更新巡检配置" :disabled="syncingPlanId === plan.id" @click="syncPlan(plan)"><RefreshCw :size="15" :class="{ 'spin-icon': syncingPlanId === plan.id }" /></button><button title="执行记录" @click="openPlanRecords(plan)"><Clock3 :size="15" /></button><button class="plan-toggle-button" :class="plan.status === 'ENABLED' ? 'stop' : 'start'" :title="plan.status === 'ENABLED' ? '停用计划' : '启用计划'" @click="togglePlan(plan)"><Power :size="15" /></button></div><div><button title="编辑计划" @click="openPlanEdit(plan)"><Pencil :size="15" /></button><button title="删除计划" class="danger-action" @click="removePlan(plan)"><Trash2 :size="15" /></button></div></div></article>
+            <div v-if="visibleInspectionPlans.length === 0" class="empty-state plan-empty"><CalendarClock :size="26" /><strong>暂无巡检计划</strong></div>
           </div>
-          <div v-else class="result-list">
-            <article v-for="item in pagedPlanInspections" :key="item.id" class="result-card" @click="openInspectionDetail(item)">
-              <div class="result-status" :class="item.status.toLowerCase()"><CheckCircle2 v-if="item.status === 'PASSED'" :size="22" /><XCircle v-else :size="22" /></div>
-              <div class="result-main"><div><h3>{{ item.name }}</h3><el-tag :type="badge(item.status)" effect="light">{{ statusText(item.status) }}</el-tag></div></div>
-              <div class="result-score"><strong>{{ item.passedChecks }}/{{ item.totalChecks }}</strong></div>
-              <div class="result-meta"><time class="result-executed-at">{{ formatRecordTime(item.executedAt) }}</time><span><Clock3 :size="13" />执行耗时 {{ item.durationSeconds }} 秒</span></div>
-              <ChevronRight :size="18" class="result-arrow" />
-            </article>
-            <div v-if="selectedPlanInspections.length === 0" class="empty-state"><Clock3 :size="26" /><strong>暂无执行记录</strong><span>点击该计划的“立即执行”后会在这里生成记录。</span></div>
-            <div v-else class="inspection-pagination"><span>共 {{ selectedPlanInspections.length }} 条</span><el-pagination v-model:current-page="inspectionPage" :page-size="inspectionPageSize" :total="selectedPlanInspections.length" layout="prev, pager, next" background /></div>
+          <div v-else class="records-content">
+            <div v-if="selectedPlanInspections.length" class="table-panel">
+              <el-table :data="pagedPlanInspections" row-key="id" stripe empty-text="暂无执行记录">
+                <el-table-column prop="name" label="巡检计划" min-width="180" />
+                <el-table-column prop="projectName" label="所属项目" min-width="150" />
+                <el-table-column label="执行结果" width="110"><template #default="scope"><el-tag :type="badge(scope.row.status)" effect="light">{{ statusText(scope.row.status) }}</el-tag></template></el-table-column>
+                <el-table-column label="检查通过" width="120"><template #default="scope">{{ scope.row.passedChecks }} / {{ scope.row.totalChecks }} 项</template></el-table-column>
+                <el-table-column label="执行时间" min-width="180"><template #default="scope">{{ formatRecordTime(scope.row.executedAt) }}</template></el-table-column>
+                <el-table-column label="执行耗时" width="110"><template #default="scope">{{ scope.row.durationSeconds }} 秒</template></el-table-column>
+                <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button link type="primary" @click="openInspectionDetail(scope.row)">查看详情</el-button></template></el-table-column>
+              </el-table>
+            </div>
+            <div v-else class="plan-empty records-empty"><Clock3 :size="26" /><strong>{{ selectedInspectionPlanId && !selectedInspectionPlan && !loading ? '巡检计划不存在或已删除' : '暂无执行记录' }}</strong></div>
+            <footer v-if="selectedPlanInspections.length" class="inspection-pagination"><span>共 {{ selectedPlanInspections.length }} 条</span><el-pagination v-model:current-page="inspectionPage" :page-size="inspectionPageSize" :total="selectedPlanInspections.length" layout="prev, pager, next" background /></footer>
           </div>
         </div>
 
-        <div v-if="activeView === 'alerts'" class="table-panel">
+        <div v-if="activeView === 'alerts'" class="alert-page">
+          <section class="page-toolbar" aria-label="告警筛选">
           <div class="alert-filters" style="flex-wrap: wrap">
             <el-select v-model="alertProjectFilter" :disabled="Boolean(selectedProjectName)" clearable placeholder="全部项目" aria-label="项目筛选" style="width: 160px"><el-option v-for="name in alertProjectOptions" :key="name" :label="name" :value="name" /></el-select>
             <el-select v-model="alertPlanFilter" clearable placeholder="全部计划" aria-label="计划筛选" style="width: 160px"><el-option v-for="option in alertPlanOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select>
@@ -806,8 +942,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
             <el-select v-model="alertLevelFilter" clearable placeholder="全部级别" aria-label="级别筛选" style="width: 130px"><el-option label="异常" value="CRITICAL" /><el-option label="注意" value="WARNING" /><el-option label="提示" value="INFO" /></el-select>
             <el-date-picker v-model="alertTimeRange" type="datetimerange" value-format="YYYY-MM-DDTHH:mm:ss" start-placeholder="开始时间" end-placeholder="结束时间" aria-label="告警时间范围" style="max-width: 100%" />
           </div>
-          <div class="alert-filters"><el-select v-model="alertExternalFilter" aria-label="外部状态筛选" style="width: 140px"><el-option label="全部外部状态" value="ALL" /><el-option label="告警中" value="FIRING" /><el-option label="已恢复" value="RESOLVED" /></el-select><el-select v-model="alertHandlingFilter" aria-label="处置状态筛选" style="width: 140px"><el-option label="全部处置状态" value="ALL" /><el-option label="待处理" value="OPEN" /><el-option label="已确认" value="ACKNOWLEDGED" /><el-option label="已关闭" value="CLOSED" /></el-select></div>
-          <el-table :data="filteredAlerts" stripe @row-click="openAlertDetail"><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column prop="message" label="告警内容" min-width="240" /><el-table-column label="所属项目" min-width="150"><template #default="scope">{{ scope.row.projectNameSnapshot || scope.row.projectName }}</template></el-table-column><el-table-column prop="inspectionPlanName" label="巡检计划" min-width="150"><template #default="scope">{{ scope.row.inspectionPlanName || '--' }}</template></el-table-column><el-table-column label="告警对象" min-width="150"><template #default="scope">{{ scope.row.targetNameSnapshot || scope.row.targetName }}</template></el-table-column><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="外部状态" width="100"><template #default="scope"><el-tag :type="scope.row.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(scope.row.externalLifecycle || 'FIRING') }}</el-tag></template></el-table-column><el-table-column label="处置状态" width="110"><template #default="scope"><el-tag :type="badge(scope.row.handlingStatus)" effect="light">{{ statusText(scope.row.handlingStatus) }}</el-tag></template></el-table-column><el-table-column label="操作" width="72" fixed="right"><template #default="scope"><button class="icon-button" title="查看告警详情" @click.stop="openAlertDetail(scope.row)"><ChevronRight :size="16" /></button></template></el-table-column></el-table>
+          <div class="alert-filters"><el-select v-model="alertExternalFilter" aria-label="告警状态筛选" style="width: 140px"><el-option label="全部告警状态" value="ALL" /><el-option label="告警中" value="FIRING" /><el-option label="已恢复" value="RESOLVED" /></el-select><el-select v-model="alertHandlingFilter" aria-label="处理状态筛选" style="width: 140px"><el-option label="全部处理状态" value="ALL" /><el-option label="待处理" value="OPEN" /><el-option label="已确认" value="ACKNOWLEDGED" /><el-option label="已关闭" value="CLOSED" /></el-select></div>
+          </section>
+          <div class="table-panel">
+          <el-table :data="filteredAlerts" empty-text="暂无告警" stripe @row-click="openAlertDetail"><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column prop="message" label="告警内容" min-width="240" /><el-table-column label="所属项目" min-width="150"><template #default="scope">{{ scope.row.projectNameSnapshot || scope.row.projectName }}</template></el-table-column><el-table-column prop="inspectionPlanName" label="巡检计划" min-width="150"><template #default="scope">{{ scope.row.inspectionPlanName || '--' }}</template></el-table-column><el-table-column label="告警对象" min-width="150"><template #default="scope">{{ scope.row.targetNameSnapshot || scope.row.targetName }}</template></el-table-column><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="告警状态" width="100"><template #default="scope"><el-tag :type="scope.row.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(scope.row.externalLifecycle || 'FIRING') }}</el-tag></template></el-table-column><el-table-column label="处置状态" width="110"><template #default="scope"><el-tag :type="badge(scope.row.handlingStatus)" effect="light">{{ statusText(scope.row.handlingStatus) }}</el-tag></template></el-table-column><el-table-column label="操作" width="72" fixed="right"><template #default="scope"><button class="icon-button" title="查看告警详情" @click.stop="openAlertDetail(scope.row)"><ChevronRight :size="16" /></button></template></el-table-column></el-table>
+          </div>
         </div>
       </section>
     </main>
@@ -832,7 +971,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
         <el-form-item label="计划名称" required><el-input v-model="planForm.name" maxlength="100" placeholder="例如：礼事随记生产巡检" /></el-form-item>
         <el-form-item label="所属项目" required><el-select v-model="planForm.projectId" :disabled="Boolean(editingId)" placeholder="选择项目" style="width: 100%" @change="selectPlanProject"><el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item>
         <el-form-item label="纳管服务" required><el-select v-model="planForm.assetIds" multiple collapse-tags placeholder="选择相同频率的服务" style="width: 100%"><el-option v-for="item in assets.filter(asset => asset.projectName === planForm.projectName)" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item>
-        <div class="form-grid"><el-form-item label="监控频率" required><el-input-number v-model="planForm.intervalValue" :min="planIntervalMin" :max="planIntervalMax" style="width: 100%" /></el-form-item><el-form-item label="频率单位" required><el-select v-model="planForm.intervalUnit" style="width: 100%"><el-option label="秒" value="秒" /><el-option label="分钟" value="分钟" /><el-option label="小时" value="小时" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="检查频率" required><el-input-number v-model="planForm.intervalValue" :min="planIntervalMin" :max="planIntervalMax" style="width: 100%" /></el-form-item><el-form-item label="频率单位" required><el-select v-model="planForm.intervalUnit" style="width: 100%"><el-option label="秒" value="秒" /><el-option label="分钟" value="分钟" /><el-option label="小时" value="小时" /></el-select></el-form-item></div>
         <div class="form-grid"><el-form-item label="连续失败次数" required><el-input-number v-model="planForm.failureThreshold" :min="1" :max="10" style="width: 100%" /></el-form-item><el-form-item label="告警级别" required><el-select v-model="planForm.alertLevel" style="width: 100%"><el-option label="异常" value="CRITICAL" /><el-option label="注意" value="WARNING" /><el-option label="提示" value="INFO" /></el-select></el-form-item></div>
         <el-form-item label="计划状态"><el-segmented v-model="planForm.status" :options="[{ label: '启用', value: 'ENABLED' }, { label: '停用', value: 'DISABLED' }]" /></el-form-item>
       </el-form>
@@ -841,7 +980,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
 
     <el-drawer v-model="projectDrawerVisible" :title="selectedProject ? `项目详情 · ${selectedProject.name}` : '项目详情'" size="520px" append-to-body>
       <div v-if="selectedProject" class="project-detail">
-        <p>服务状态：{{ selectedProjectAssets.filter(asset => !isAbnormalStatus(asset.status)).length }} 项未确认异常，{{ selectedProjectAssets.filter(asset => isAbnormalStatus(asset.status)).length }} 项异常；历史告警 {{ selectedProjectAlerts.length }} 条，已关闭 {{ selectedProjectAlerts.filter(alert => alert.handlingStatus === 'CLOSED').length }} 条。</p>
         <div class="project-detail-summary"><div><span>项目类型</span><strong>{{ selectedProject.projectType || '业务系统' }}</strong></div><div><span>运行状态</span><el-tag :type="badge(selectedProject.status)">{{ statusText(selectedProject.status) }}</el-tag></div></div>
         <dl class="alert-context"><div><dt>负责人</dt><dd>{{ selectedProject.owner }}</dd></div><div><dt>联系方式</dt><dd>{{ selectedProject.contactPhone || '--' }}</dd></div><div><dt>运维到期日</dt><dd>{{ selectedProject.maintenanceExpiresAt || '--' }}</dd></div><div><dt>项目说明</dt><dd>{{ selectedProject.description || '--' }}</dd></div></dl>
         <div class="project-detail-metrics"><button @click="projectDrawerVisible = false; openProjectServices(selectedProject)"><strong>{{ selectedProjectAssets.length }}</strong><span>纳管服务</span></button><button @click="projectDrawerVisible = false; navigateTo('inspections')"><strong>{{ selectedProjectPlans.length }}</strong><span>巡检计划</span></button><button @click="projectDrawerVisible = false; openProjectAlerts(selectedProject)"><strong>{{ selectedProjectAlerts.filter(item => item.handlingStatus !== 'CLOSED').length }}</strong><span>当前告警</span></button></div>
@@ -858,33 +996,30 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewportWidth))
       </div>
     </el-drawer>
 
-    <el-drawer v-model="monitoringDrawerVisible" :title="monitoringDetails ? `监控详情 · ${monitoringDetails.asset.name}` : '监控详情'" size="560px">
+    <el-drawer v-model="monitoringDrawerVisible" :title="monitoringDetails ? `服务详情 · ${monitoringDetails.asset.name}` : '服务详情'" size="560px">
       <div class="monitoring-detail" v-loading="monitoringDetailLoading">
         <template v-if="monitoringDetails">
-          <div class="monitoring-summary"><div><span>运行状态</span><strong>{{ statusText(monitoringDetails.asset.status) }}</strong></div><div><span>监控 ID</span><strong>{{ monitoringDetails.asset.hertzbeatMonitorId || '--' }}</strong></div><div><span>最近采集</span><strong>{{ monitoringDetails.asset.lastCollectedAt ? formatTime(monitoringDetails.asset.lastCollectedAt) : '--' }}</strong></div></div>
-          <div class="monitoring-summary"><div><span>监控类型</span><strong>{{ monitoringDetails.asset.type }}</strong></div><div><span>最近同步尝试</span><strong>{{ monitoringDetails.asset.lastSyncAttemptAt ? formatTime(monitoringDetails.asset.lastSyncAttemptAt) : '尚未尝试' }}</strong></div><div><span>最近同步成功</span><strong>{{ monitoringDetails.asset.lastSuccessfulSyncAt ? formatTime(monitoringDetails.asset.lastSuccessfulSyncAt) : '尚未成功' }}</strong></div></div>
-          <div class="monitoring-summary"><div><span>所属巡检计划</span><strong>{{ currentServicePlan(monitoringDetails!.asset)?.name || '未配置启用计划' }}</strong></div><div><span>当前告警</span><strong>{{ currentAssetAlerts(monitoringDetails!.asset).length }} 个</strong></div><div><span>配置入口</span><el-button link type="primary" @click="openAssetPlanConfiguration(monitoringDetails!.asset)">配置巡检计划</el-button></div></div>
-          <el-alert v-if="monitoringDetails.asset.monitoringError" :title="monitoringDetails.asset.monitoringError" type="warning" :closable="false" show-icon />
-          <el-alert v-if="!monitoringDetails.metricsCollectedAt" title="暂无指标采样；服务可用性以监控状态为准" type="info" :closable="false" show-icon />
-          <el-alert v-else-if="monitoringDetails.metricsStale" title="当前指标超过 180 秒未更新，数据已陈旧" type="warning" :closable="false" show-icon />
-          <el-alert v-if="monitoringDetails.metricsMessage" :title="monitoringDetails.metricsMessage" type="info" :closable="false" show-icon />
-          <div class="monitoring-metrics"><article v-for="metric in monitoringDetails.latestMetrics" :key="metric.name"><span>{{ metricLabel(metric.name) }}</span><strong>{{ metricValue(metric) }}</strong><small>{{ metric.collectedAt ? formatTime(metric.collectedAt) : '暂无采集时间' }}</small></article></div>
+          <div class="monitoring-summary"><div><span>服务状态</span><strong>{{ serviceState(monitoringDetails.asset).text }}</strong></div><div><span>服务类型</span><strong>{{ monitoringDetails.asset.type }}</strong></div><div><span>最近检查</span><strong>{{ monitoringDetails.asset.lastCollectedAt ? formatTime(monitoringDetails.asset.lastCollectedAt) : '尚未检查' }}</strong></div></div>
+          <div class="monitoring-summary"><div><span>所属巡检计划</span><strong>{{ currentServicePlan(monitoringDetails.asset)?.name || '未加入计划' }}</strong></div><div><span>巡检配置</span><strong>{{ serviceInspectionConfiguration(monitoringDetails.asset).text }}</strong></div><div><span>当前告警</span><strong>{{ currentAssetAlerts(monitoringDetails.asset).length }} 个</strong></div></div>
+          <el-alert v-if="monitoringDetails.asset.monitoringError" title="巡检配置异常，请检查计划配置" type="warning" :closable="false" show-icon />
+          <el-alert v-else-if="monitoringDetails.asset.lastCollectedAt && serviceState(monitoringDetails.asset).text === '待检测'" title="检测结果待更新" type="info" :closable="false" show-icon />
+          <div v-if="!monitoringDetails.latestMetrics.length" class="empty-trend">暂无检测数据</div>
+          <div class="monitoring-metrics"><article v-for="metric in monitoringDetails.latestMetrics" :key="metric.name"><span>{{ metricLabel(metric.name) }}</span><strong>{{ metricValue(metric) }}</strong><small v-if="metric.collectedAt">{{ formatTime(metric.collectedAt) }}</small></article></div>
           <div class="trend-section"><h3>最近一小时响应时间</h3><div v-if="monitoringDetails.history.length" class="trend-bars"><i v-for="(point, index) in monitoringDetails.history" :key="index" :style="{ height: `${Math.max(8, Math.min(100, Number(point.value || 0) / 3))}%` }" :title="metricValue(point)" /></div><div v-else class="empty-trend">暂无趋势数据</div></div>
-          <div class="sync-history"><h3>最近同步运行</h3><div v-for="run in monitoringRuns.slice(0, 5)" :key="run.id"><el-tag :type="run.status === 'SUCCESS' ? 'success' : run.status === 'PARTIAL' ? 'warning' : 'danger'" size="small">{{ run.status }}</el-tag><span>{{ formatRecordTime(run.startedAt) }}</span><span>状态 {{ run.assetsUpdated }} / 告警 {{ run.alertsUpdated }}</span></div></div>
           <div class="sync-history"><h3>当前告警</h3><div v-for="item in currentAssetAlerts(monitoringDetails!.asset)" :key="item.id"><el-tag :type="badge(item.level)" size="small">{{ statusText(item.level) }}</el-tag><span>{{ item.message }}</span><span>{{ statusText(item.externalLifecycle || 'FIRING') }}</span></div><div v-if="currentAssetAlerts(monitoringDetails!.asset).length === 0" class="empty-trend">暂无当前告警</div></div>
         </template>
       </div>
+      <template v-if="monitoringDetails" #footer><el-button type="primary" @click="openAssetPlanConfiguration(monitoringDetails.asset)">{{ currentServicePlan(monitoringDetails.asset) ? '查看巡检计划' : '新增巡检计划' }}</el-button></template>
     </el-drawer>
 
     <el-drawer v-model="alertDrawerVisible" :title="selectedAlert ? `告警详情 · ${selectedAlert.targetNameSnapshot || selectedAlert.targetName}` : '告警详情'" :size="alertDrawerSize" append-to-body>
       <div v-if="selectedAlert" class="alert-detail" v-loading="alertDetailLoading">
-        <div class="alert-state-summary"><div><span>外部生命周期</span><el-tag :type="selectedAlert.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(selectedAlert.externalLifecycle || 'FIRING') }}</el-tag></div><div><span>平台处置状态</span><el-tag :type="badge(selectedAlert.handlingStatus)" effect="light">{{ statusText(selectedAlert.handlingStatus) }}</el-tag></div></div>
+        <div class="alert-state-summary"><div><span>告警状态</span><el-tag :type="selectedAlert.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(selectedAlert.externalLifecycle || 'FIRING') }}</el-tag></div><div><span>处理状态</span><el-tag :type="badge(selectedAlert.handlingStatus)" effect="light">{{ statusText(selectedAlert.handlingStatus) }}</el-tag></div></div>
         <div class="alert-message"><span class="severity" :class="selectedAlert.level.toLowerCase()">{{ statusText(selectedAlert.level) }}</span><strong>{{ selectedAlert.message }}</strong></div>
         <dl class="alert-context"><div><dt>所属项目</dt><dd>{{ selectedAlert.projectNameSnapshot || selectedAlert.projectName }}</dd></div><div><dt>巡检计划</dt><dd>{{ selectedAlert.inspectionPlanName || '--' }}</dd></div><div><dt>告警对象</dt><dd>{{ selectedAlert.targetNameSnapshot || selectedAlert.targetName }}</dd></div><div><dt>首次发生</dt><dd>{{ formatRecordTime(selectedAlert.firstOccurredAt || selectedAlert.occurredAt) }}</dd></div><div><dt>本次发生</dt><dd>{{ formatRecordTime(selectedAlert.occurredAt) }}</dd></div><div><dt>恢复时间</dt><dd>{{ selectedAlert.resolvedAt ? formatRecordTime(selectedAlert.resolvedAt) : '--' }}</dd></div></dl>
         <div class="alert-actions"><el-button v-if="selectedAlert.handlingStatus === 'OPEN'" type="primary" :loading="alertActionLoading" @click="handleAlertAction('acknowledge')">确认告警</el-button><el-button :loading="alertActionLoading" @click="handleAlertAction('note')">添加备注</el-button><el-button v-if="selectedAlert.externalLifecycle === 'RESOLVED' && selectedAlert.handlingStatus !== 'CLOSED'" type="success" :loading="alertActionLoading" @click="handleAlertAction('close')">关闭告警</el-button></div>
         <section class="alert-history"><h3>处置历史</h3><el-timeline v-if="alertEvents.length"><el-timeline-item v-for="event in alertEvents" :key="event.id" :timestamp="formatRecordTime(event.occurredAt)" placement="top"><strong>{{ statusText(event.action) }}</strong><p>{{ event.operatorName }}<template v-if="event.note"> · {{ event.note }}</template></p><small>{{ statusText(event.fromStatus) }} → {{ statusText(event.toStatus) }}</small></el-timeline-item></el-timeline><div v-else class="empty-trend">暂无处置记录</div></section>
       </div>
     </el-drawer>
-    <MonitoringMigrationPanel v-model="migrationVisible" :projects="projects" :service-id="migrationServiceId" @changed="loadData" />
   </div>
 </template>

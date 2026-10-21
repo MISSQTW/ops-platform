@@ -34,26 +34,6 @@ class InspectionExecutionServiceTest {
   }
 
   @Test
-  void 迁移失败期间新计划不应与启用旧计划重复调度() {
-    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
-    AssetRepository assets = mock(AssetRepository.class);
-    InspectionRepository inspections = mock(InspectionRepository.class);
-    InspectionItemRepository items = mock(InspectionItemRepository.class);
-    InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
-    InspectionPlan owner = monitoringPlan(11L);
-    InspectionPlan legacy = new InspectionPlan("旧计划", "支付系统", "全部服务", "每 1 分钟", "ENABLED", LocalDateTime.now());
-    when(plans.findAll()).thenReturn(List.of(legacy, owner));
-    when(plans.findByStatusAndNextRunAtLessThanEqualOrderByNextRunAt(any(), any())).thenReturn(List.of(owner));
-    when(assets.findByProjectNameOrderById("支付系统")).thenReturn(List.of(asset(21L, "UNKNOWN")));
-
-    new InspectionExecutionService(plans, assets, inspections, items, bindings).executeDuePlans();
-
-    verify(inspections, never()).save(any());
-    verify(items, never()).save(any());
-    assertThat(owner.getNextRunAt()).isAfter(LocalDateTime.now());
-  }
-
-  @Test
   void 新监控计划应立即进入本地兜底调度() {
     InspectionPlan plan = InspectionPlan.monitoring("核心服务巡检", 1L, "支付系统", 60, 3, "CRITICAL");
 
@@ -115,29 +95,6 @@ class InspectionExecutionServiceTest {
   }
 
   @Test
-  void 旧计划应排除已被新计划完整接管的服务() {
-    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
-    AssetRepository assets = mock(AssetRepository.class);
-    InspectionRepository inspections = mock(InspectionRepository.class);
-    InspectionItemRepository items = mock(InspectionItemRepository.class);
-    InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
-    InspectionPlan legacy = new InspectionPlan("旧计划", "支付系统", "全部服务", "每 1 分钟", "ENABLED", LocalDateTime.now());
-    InspectionPlan owner = monitoringPlan(11L);
-    Asset asset = asset(21L, "UNKNOWN");
-    InspectionPlanBinding binding = InspectionPlanBinding.managed(11L, 21L, owner.getDesiredVersion());
-    binding.markSynchronized(31L, 41L, true, LocalDateTime.now());
-    when(plans.findByStatusAndNextRunAtLessThanEqualOrderByNextRunAt(any(), any())).thenReturn(List.of(legacy));
-    when(assets.findByProjectNameOrderById("支付系统")).thenReturn(List.of(asset));
-    when(bindings.findByActiveOwnerKey(21L)).thenReturn(java.util.Optional.of(binding));
-    when(plans.findById(11L)).thenReturn(java.util.Optional.of(owner));
-
-    new InspectionExecutionService(plans, assets, inspections, items, bindings).executeDuePlans();
-
-    verify(inspections, never()).save(any());
-    verify(items, never()).save(any());
-  }
-
-  @Test
   void 同步失败服务应继续本地周期检查避免监控空窗() {
     InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
     AssetRepository assets = mock(AssetRepository.class);
@@ -147,9 +104,6 @@ class InspectionExecutionServiceTest {
     InspectionExecutionService execution = new InspectionExecutionService(
         plans, assets, inspections, inspectionItems, bindings);
     InspectionPlan plan = monitoringPlan(12L);
-    InspectionPlan disabledLegacy = new InspectionPlan("已停用旧计划", "支付系统", "全部服务", "每 1 分钟",
-        "DISABLED", LocalDateTime.now());
-    when(plans.findAll()).thenReturn(List.of(plan, disabledLegacy));
     Asset asset = asset(22L, "HEALTHY");
     InspectionPlanBinding binding = InspectionPlanBinding.managed(12L, 22L, plan.getDesiredVersion());
     binding.markMonitorSynchronized(32L, true, LocalDateTime.now());
@@ -217,6 +171,69 @@ class InspectionExecutionServiceTest {
     InspectionPlan plan = InspectionPlan.monitoring("核心服务巡检", 1L, "支付系统", 60, 3, "CRITICAL");
     ReflectionTestUtils.setField(plan, "id", id);
     return plan;
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+  void 已同步计划手动执行应生成记录且不改变定时周期和权威状态(boolean passed) {
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    AssetRepository assets = mock(AssetRepository.class);
+    InspectionRepository inspections = mock(InspectionRepository.class);
+    InspectionItemRepository inspectionItems = mock(InspectionItemRepository.class);
+    InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
+    InspectionExecutionService execution = org.mockito.Mockito.spy(new InspectionExecutionService(plans, assets, inspections, inspectionItems, bindings));
+    InspectionPlan plan = monitoringPlan(15L);
+    Asset managedAsset = asset(25L, "HEALTHY");
+    managedAsset.markSynced(35L, "已同步");
+    Asset unrelatedAsset = asset(26L, "HEALTHY");
+    org.mockito.Mockito.doReturn(new InspectionExecutionService.AddressTestResult(passed, "即时检查结果", 1L))
+        .when(execution).testAddress(managedAsset);
+    InspectionPlanBinding binding = InspectionPlanBinding.managed(15L, 25L, plan.getDesiredVersion());
+    binding.markSynchronized(35L, 45L, true, LocalDateTime.now());
+    LocalDateTime nextRun = plan.getNextRunAt();
+    when(plans.findById(15L)).thenReturn(java.util.Optional.of(plan));
+    when(assets.findByProjectNameOrderById("支付系统")).thenReturn(List.of(managedAsset, unrelatedAsset));
+    when(bindings.findByPlanIdOrderById(15L)).thenReturn(List.of(binding));
+    when(inspections.save(any())).thenAnswer(invocation -> {
+      Inspection inspection = invocation.getArgument(0);
+      ReflectionTestUtils.setField(inspection, "id", 55L);
+      return inspection;
+    });
+
+    Inspection inspection = execution.execute(15L);
+
+    assertThat(inspection.getTotalChecks()).isEqualTo(1);
+    assertThat(inspection.getStatus()).isEqualTo(passed ? "PASSED" : "FAILED");
+    verify(execution).testAddress(managedAsset);
+    verify(execution, never()).testAddress(unrelatedAsset);
+    verify(inspectionItems).save(any());
+    assertThat(managedAsset.getStatus()).isEqualTo("HEALTHY");
+    assertThat(unrelatedAsset.getStatus()).isEqualTo("HEALTHY");
+    assertThat(plan.getNextRunAt()).isEqualTo(nextRun);
+  }
+
+  @Test
+  void 停用计划不能立即执行() {
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    InspectionPlan plan = monitoringPlan(16L);
+    plan.reconfigure(plan.getName(), 60, 3, "CRITICAL", "DISABLED");
+    when(plans.findById(16L)).thenReturn(java.util.Optional.of(plan));
+    InspectionExecutionService execution = new InspectionExecutionService(plans, null, null, null, null);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> execution.execute(16L))
+        .isInstanceOf(IllegalStateException.class).hasMessage("请先启用巡检计划");
+  }
+
+  @Test
+  void 已删除计划不能立即执行() {
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    InspectionPlan plan = monitoringPlan(17L);
+    ReflectionTestUtils.setField(plan, "lifecycleStatus", "DELETED");
+    when(plans.findById(17L)).thenReturn(java.util.Optional.of(plan));
+    InspectionExecutionService execution = new InspectionExecutionService(plans, null, null, null, null);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> execution.execute(17L))
+        .isInstanceOf(java.util.NoSuchElementException.class).hasMessage("巡检计划不存在");
   }
 
   private Asset asset(Long id, String status) {

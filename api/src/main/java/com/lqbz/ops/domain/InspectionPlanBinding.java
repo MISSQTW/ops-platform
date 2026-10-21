@@ -63,30 +63,6 @@ public class InspectionPlanBinding {
     if (!"RELEASED".equals(ownershipStatus)) this.desiredVersion = desiredVersion;
   }
 
-  public static InspectionPlanBinding claimExisting(Long planId, Long assetId, long desiredVersion, Long monitorId) {
-    InspectionPlanBinding binding = managed(planId, assetId, desiredVersion);
-    binding.hertzbeatMonitorId = monitorId;
-    binding.monitorActualState = "ENABLED";
-    binding.ruleActualState = "UNKNOWN";
-    return binding;
-  }
-
-  public static InspectionPlanBinding pendingMigration(Long planId, Long assetId, Long monitorId) {
-    InspectionPlanBinding binding = managed(planId, assetId, 1L);
-    binding.ownershipStatus = "MIGRATION_PENDING";
-    binding.hertzbeatMonitorId = monitorId;
-    binding.monitorDesiredState = "UNCONFIRMED";
-    binding.ruleDesiredState = "UNCONFIRMED";
-    return binding;
-  }
-
-  public void confirmMigration() {
-    if (!"MIGRATION_PENDING".equals(ownershipStatus)) throw new IllegalStateException("绑定不是待确认迁移");
-    this.ownershipStatus = "OWNED";
-    this.monitorDesiredState = "ENABLED";
-    this.ruleDesiredState = "ENABLED";
-  }
-
   public void requestRelease(long desiredVersion) {
     this.desiredVersion = desiredVersion;
     this.ownershipStatus = "PENDING_RELEASE";

@@ -6,7 +6,6 @@ import com.lqbz.ops.domain.*;
 import com.lqbz.ops.service.InspectionExecutionService;
 import com.lqbz.ops.service.InspectionPlanPolicyService;
 import com.lqbz.ops.service.InspectionPlanMonitoringSyncService;
-import com.lqbz.ops.service.MonitoringPolicyMigrationService;
 import com.lqbz.ops.integration.MonitoringCleanupService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Sort;
@@ -36,19 +35,17 @@ public class ResourceController {
   private final InspectionExecutionService inspectionExecutionService;
   private final MonitoringCleanupService monitoringCleanupService;
   private final InspectionPlanPolicyService inspectionPlanPolicyService;
-  private final MonitoringPolicyMigrationService monitoringPolicyMigrationService;
   private final InspectionPlanBindingRepository inspectionPlanBindings;
   private final InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService;
-  private final com.lqbz.ops.service.MonitoringMigrationTopologyLock topologyLock;
+  private final com.lqbz.ops.service.MonitoringTopologyLock topologyLock;
 
   public ResourceController(ProjectRepository projects, AssetRepository assets, InspectionRepository inspections,
       AlertRepository alerts, AuditLogRepository audits, InspectionPlanRepository inspectionPlans,
       InspectionItemRepository inspectionItems, InspectionExecutionService inspectionExecutionService,
       MonitoringCleanupService monitoringCleanupService, InspectionPlanPolicyService inspectionPlanPolicyService,
-      MonitoringPolicyMigrationService monitoringPolicyMigrationService,
       InspectionPlanBindingRepository inspectionPlanBindings,
       InspectionPlanMonitoringSyncService inspectionPlanMonitoringSyncService,
-      com.lqbz.ops.service.MonitoringMigrationTopologyLock topologyLock) {
+      com.lqbz.ops.service.MonitoringTopologyLock topologyLock) {
     this.projects = projects;
     this.assets = assets;
     this.inspections = inspections;
@@ -59,7 +56,6 @@ public class ResourceController {
     this.inspectionExecutionService = inspectionExecutionService;
     this.monitoringCleanupService = monitoringCleanupService;
     this.inspectionPlanPolicyService = inspectionPlanPolicyService;
-    this.monitoringPolicyMigrationService = monitoringPolicyMigrationService;
     this.inspectionPlanBindings = inspectionPlanBindings;
     this.inspectionPlanMonitoringSyncService = inspectionPlanMonitoringSyncService;
     this.topologyLock = topologyLock;
@@ -75,10 +71,6 @@ public class ResourceController {
   @GetMapping("/inspection-plans/{id}")
   public InspectionPlanPolicyService.InspectionPlanView inspectionPlan(@PathVariable Long id) {
     return inspectionPlanPolicyService.get(id);
-  }
-  @GetMapping("/inspection-plans/migration-report")
-  public MonitoringPolicyMigrationService.MigrationReport inspectionPlanMigrationReport() {
-    return monitoringPolicyMigrationService.dryRun();
   }
   @GetMapping("/inspections/{id}/items") public List<InspectionItem> inspectionItems(@PathVariable Long id) {
     if (!inspections.existsById(id)) throw new NoSuchElementException("巡检记录不存在");
@@ -134,49 +126,11 @@ public class ResourceController {
 
   @PostMapping("/inspection-plans")
   @ResponseStatus(HttpStatus.CREATED)
-  public Object createInspectionPlan(@Valid @RequestBody InspectionPlanRequest request) {
-    if (request.monitoringPolicy()) {
-      InspectionPlanPolicyService.InspectionPlanView plan = inspectionPlanPolicyService.create(request);
-      audits.save(new AuditLog("CREATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.name()));
-      return plan;
-    }
-    if (request.scopeText() == null || request.scheduleText() == null || request.nextRunAt() == null) {
-      throw new IllegalArgumentException("旧巡检计划必须提供巡检范围、执行周期和下次执行时间");
-    }
-    InspectionPlan plan = inspectionPlans.save(new InspectionPlan(request.name(), request.projectName(),
-        request.scopeText(), request.scheduleText(), valueOr(request.status(), "ENABLED"), request.nextRunAt()));
-    audits.save(new AuditLog("CREATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.getName()));
-    return plan;
-  }
-
-  @PutMapping("/inspection-plans/{id}")
-  @Transactional
-  public InspectionPlan updateInspectionPlan(@PathVariable Long id,
+  public InspectionPlanPolicyService.InspectionPlanView createInspectionPlan(
       @Valid @RequestBody InspectionPlanRequest request) {
-    if (request.monitoringPolicy()) {
-      throw new IllegalArgumentException("结构化巡检计划请使用 /api/monitoring-plans/{id}");
-    }
-    InspectionPlan plan = inspectionPlans.findById(id)
-        .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    if (plan.isMonitoringPolicy()) {
-      throw new IllegalArgumentException("结构化巡检计划请使用 /api/monitoring-plans/{id}");
-    }
-    plan.update(request.name(), request.projectName(), request.scopeText(), request.scheduleText(),
-        valueOr(request.status(), plan.getStatus()), request.nextRunAt());
-    audits.save(new AuditLog("UPDATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.getName()));
+    InspectionPlanPolicyService.InspectionPlanView plan = inspectionPlanPolicyService.create(request);
+    audits.save(new AuditLog("CREATE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.name()));
     return plan;
-  }
-
-  @DeleteMapping("/inspection-plans/{id}")
-  @ResponseStatus(HttpStatus.NO_CONTENT)
-  public void deleteInspectionPlan(@PathVariable Long id) {
-    InspectionPlan plan = inspectionPlans.findById(id)
-        .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    if (plan.isMonitoringPolicy()) {
-      throw new IllegalArgumentException("结构化巡检计划请使用 /api/monitoring-plans/{id}");
-    }
-    inspectionPlans.delete(plan);
-    audits.save(new AuditLog("DELETE_INSPECTION_PLAN", "INSPECTION_PLAN", plan.getName()));
   }
 
   @PutMapping("/monitoring-plans/{id}")
@@ -198,12 +152,6 @@ public class ResourceController {
   @PostMapping("/monitoring-plans/sync-all")
   public InspectionPlanMonitoringSyncService.SyncAllSummary syncAllMonitoringPlans() {
     return inspectionPlanMonitoringSyncService.syncAllPlans();
-  }
-
-  @PostMapping("/inspection-plans/migration-claims")
-  public InspectionPlanPolicyService.MigrationBatchResult claimInspectionPlanMigration(
-      @RequestBody List<InspectionPlanPolicyService.MigrationClaim> claims) {
-    throw new org.springframework.web.server.ResponseStatusException(HttpStatus.GONE, "请使用迁移提案准备和确认接口");
   }
 
   @PostMapping("/inspection-plans/{id}/execute")

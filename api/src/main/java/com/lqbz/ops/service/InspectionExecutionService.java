@@ -55,18 +55,14 @@ public class InspectionExecutionService {
   public Inspection execute(Long planId) {
     InspectionPlan plan = plans.findById(planId)
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    if ("PENDING_CONFIRMATION".equals(plan.getStatus())) throw new IllegalStateException("待确认迁移计划不能执行巡检");
+    if ("DELETED".equals(plan.getLifecycleStatus())) throw new NoSuchElementException("巡检计划不存在");
+    if (!"ENABLED".equals(plan.getStatus())) throw new IllegalStateException("请先启用巡检计划");
     Inspection inspection = execute(plan, false);
     if (inspection == null) {
       if (assets.findByProjectNameOrderById(plan.getProjectName()).isEmpty()) {
         throw new IllegalStateException("计划所属项目没有可执行服务，请先添加服务");
       }
-      if (legacyOwnsLocalExecution(plan) && bindings.findByPlanIdOrderById(plan.getId()).stream()
-          .anyMatch(binding -> "OWNED".equals(binding.getOwnershipStatus())
-              && !binding.isHertzBeatReady(plan.getDesiredVersion()))) {
-        throw new IllegalStateException("服务仍由原有巡检计划执行，迁移同步完成后由 HertzBeat 接管");
-      }
-      throw new IllegalStateException("计划内服务已由 HertzBeat 执行周期巡检，请使用地址测试");
+      throw new IllegalStateException("计划内没有可执行服务，请先配置巡检服务");
     }
     return inspection;
   }
@@ -83,7 +79,7 @@ public class InspectionExecutionService {
 
   private Inspection execute(InspectionPlan plan, boolean scheduled) {
     long startedAt = System.nanoTime();
-    List<Asset> projectAssets = localExecutionAssets(plan);
+    List<Asset> projectAssets = executionAssets(plan, scheduled);
     if (projectAssets.isEmpty()) {
       if (scheduled) plan.scheduleNextRun(calculateNextRun(plan.getScheduleText(), LocalDateTime.now()));
       return null;
@@ -107,30 +103,19 @@ public class InspectionExecutionService {
     return inspection;
   }
 
-  private List<Asset> localExecutionAssets(InspectionPlan plan) {
+  private List<Asset> executionAssets(InspectionPlan plan, boolean scheduled) {
     List<Asset> projectAssets = assets.findByProjectNameOrderById(plan.getProjectName());
-    if (legacyOwnsLocalExecution(plan)) return List.of();
-    if (!plan.isMonitoringPolicy()) {
-      return projectAssets.stream().filter(asset -> !bindings.findByActiveOwnerKey(asset.getId())
-          .flatMap(binding -> plans.findById(binding.getPlanId())
-              .map(owner -> binding.isHertzBeatReady(owner.getDesiredVersion())))
-          .orElse(false)).toList();
-    }
     Map<Long, InspectionPlanBinding> planBindings = bindings.findByPlanIdOrderById(plan.getId()).stream()
         .filter(binding -> !"RELEASED".equals(binding.getOwnershipStatus()))
         .collect(Collectors.toMap(InspectionPlanBinding::getAssetId, Function.identity(), (left, right) -> right));
     return projectAssets.stream()
         .filter(asset -> {
           InspectionPlanBinding binding = planBindings.get(asset.getId());
-          return binding != null && !binding.isHertzBeatReady(plan.getDesiredVersion());
+          return binding != null && (scheduled
+              ? !binding.isHertzBeatReady(plan.getDesiredVersion())
+              : "OWNED".equals(binding.getOwnershipStatus()) && "ENABLED".equals(binding.getMonitorDesiredState()));
         })
         .toList();
-  }
-
-  private boolean legacyOwnsLocalExecution(InspectionPlan plan) {
-    return plan.isMonitoringPolicy() && plans.findAll().stream()
-        .anyMatch(legacy -> !legacy.isMonitoringPolicy() && "ENABLED".equals(legacy.getStatus())
-            && plan.getProjectName().equals(legacy.getProjectName()));
   }
 
   public AddressTestResult testAddress(Asset asset) {
@@ -189,7 +174,7 @@ public class InspectionExecutionService {
       case "RABBITMQ" -> 5672;
       case "ROCKETMQ" -> 9876;
       case "MINIO" -> 9000;
-      default -> throw new IllegalArgumentException("无法识别资产端口");
+      default -> throw new IllegalArgumentException("无法识别服务端口");
     };
   }
 

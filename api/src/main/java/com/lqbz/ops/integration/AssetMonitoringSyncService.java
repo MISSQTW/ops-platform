@@ -19,7 +19,7 @@ public class AssetMonitoringSyncService {
 
   @Transactional
   public Asset sync(Long assetId) {
-    Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("资产不存在"));
+    Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("服务不存在"));
     return syncAsset(asset);
   }
 

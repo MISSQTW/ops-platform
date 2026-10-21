@@ -28,12 +28,12 @@ public class InspectionPlanMonitoringSyncService {
   private final AssetRepository assets;
   private final HertzBeatClient hertzBeatClient;
   private final InspectionPlanMonitoringSyncService self;
-  private final MonitoringMigrationTopologyLock topologyLock;
+  private final MonitoringTopologyLock topologyLock;
 
   public InspectionPlanMonitoringSyncService(InspectionPlanRepository plans,
       InspectionPlanBindingRepository bindings, MonitoringConfigTaskRepository tasks,
       AssetRepository assets, HertzBeatClient hertzBeatClient,
-      @Lazy InspectionPlanMonitoringSyncService self, MonitoringMigrationTopologyLock topologyLock) {
+      @Lazy InspectionPlanMonitoringSyncService self, MonitoringTopologyLock topologyLock) {
     this.plans = plans;
     this.bindings = bindings;
     this.tasks = tasks;
@@ -73,7 +73,7 @@ public class InspectionPlanMonitoringSyncService {
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     InspectionPlanBinding binding = bindings.findCurrentForUpdate(task.getPlanId(), task.getAssetId()).orElse(null);
     LocalDateTime now = LocalDateTime.now();
-    if ("PENDING_CONFIRMATION".equals(plan.getStatus()) || task.isObsolete(plan.getDesiredVersion()) || binding == null
+    if (task.isObsolete(plan.getDesiredVersion()) || binding == null
         || !task.getDesiredVersion().equals(binding.getDesiredVersion())) {
       task.obsolete(now);
       refreshPlanSummary(plan, now);
@@ -144,7 +144,6 @@ public class InspectionPlanMonitoringSyncService {
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void enqueueCurrentVersion(Long planId, boolean rescheduleCompleted) {
     InspectionPlan plan = plans.findByIdForUpdate(planId).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    if ("PENDING_CONFIRMATION".equals(plan.getStatus())) return;
     for (InspectionPlanBinding binding : bindings.findByPlanIdOrderById(plan.getId())) {
       if ("RELEASED".equals(binding.getOwnershipStatus())) continue;
       if ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())

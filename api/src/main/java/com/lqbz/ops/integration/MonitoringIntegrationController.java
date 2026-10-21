@@ -56,7 +56,7 @@ public class MonitoringIntegrationController {
 
   @GetMapping("/hertzbeat/assets/{id}/details")
   public MonitoringDetails monitoringDetails(@PathVariable Long id) throws Exception {
-    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("资产不存在"));
+    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
     if (asset.getHertzbeatMonitorId() == null) {
       return new MonitoringDetails(asset, List.of(), List.of(), "尚未绑定 HertzBeat 监控", false, null, true);
     }

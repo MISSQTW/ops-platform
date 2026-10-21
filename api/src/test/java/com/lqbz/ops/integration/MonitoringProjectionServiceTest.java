@@ -143,7 +143,8 @@ class MonitoringProjectionServiceTest {
     asset.markSynced(321L, "同步成功");
     InspectionPlan plan = InspectionPlan.monitoring("核心巡检", 9L, "订单平台", 60, 2, "CRITICAL");
     org.springframework.test.util.ReflectionTestUtils.setField(plan, "id", 88L);
-    InspectionPlanBinding binding = InspectionPlanBinding.claimExisting(88L, 77L, 1L, 321L);
+    InspectionPlanBinding binding = InspectionPlanBinding.managed(88L, 77L, 1L);
+    binding.markMonitorSynchronized(321L, true, LocalDateTime.now());
     when(assets.findByMonitoringMode("HERTZBEAT")).thenReturn(List.of(asset));
     when(client.monitorStatus(321L)).thenReturn(new HertzBeatClient.MonitorStatus("DOWN", LocalDateTime.now(), false));
     when(client.alerts("firing")).thenReturn(List.of(new HertzBeatClient.ExternalAlert(

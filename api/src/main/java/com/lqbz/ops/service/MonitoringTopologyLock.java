@@ -7,10 +7,10 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class MonitoringMigrationTopologyLock {
+public class MonitoringTopologyLock {
   private final JdbcTemplate jdbc;
 
-  public MonitoringMigrationTopologyLock(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+  public MonitoringTopologyLock(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
   @Transactional(propagation = Propagation.MANDATORY)
   public void acquireServices(java.util.List<Long> assetIds) {
@@ -27,20 +27,6 @@ public class MonitoringMigrationTopologyLock {
           statement.setLong(1, postgres ? assetId ^ 0x4f50530000000000L : assetId);
           statement.execute();
         }
-      }
-      return null;
-    });
-  }
-
-  @Transactional(propagation = Propagation.MANDATORY)
-  public void acquire() {
-    jdbc.execute((ConnectionCallback<Void>) connection -> {
-      if (!"PostgreSQL".equals(connection.getMetaData().getDatabaseProductName())) {
-        throw new IllegalStateException("迁移准备和确认需要PostgreSQL事务锁，请使用正式数据库");
-      }
-      try (var statement = connection.createStatement()) {
-        statement.execute("SET LOCAL lock_timeout = '5s'");
-        statement.execute("LOCK TABLE ops_asset, ops_inspection_plan, ops_inspection_plan_binding, ops_project IN SHARE ROW EXCLUSIVE MODE");
       }
       return null;
     });

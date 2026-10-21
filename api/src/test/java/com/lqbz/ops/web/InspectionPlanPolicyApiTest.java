@@ -30,13 +30,6 @@ class InspectionPlanPolicyApiTest {
   @Autowired private InspectionPlanBindingRepository bindings;
 
   @Test
-  void 旧迁移认领入口应停用且不得绕过提案确认() throws Exception {
-    mockMvc.perform(post("/api/inspection-plans/migration-claims")
-        .contentType(MediaType.APPLICATION_JSON).content("[{\"planId\":1,\"assetId\":1}]"))
-        .andExpect(status().isGone());
-  }
-
-  @Test
   void 未知类型即使提供端口也不能加入启用计划() throws Exception {
     long projectId = createProject("类型准入系统");
     var response = mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON)
@@ -134,13 +127,6 @@ class InspectionPlanPolicyApiTest {
   }
 
   @Test
-  void 迁移报告固定路由不应被计划详情路由吞掉() throws Exception {
-    mockMvc.perform(get("/api/inspection-plans/migration-report"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.items").isArray());
-  }
-
-  @Test
   void 已释放服务重新加入同一计划时应创建新的有效绑定() throws Exception {
     long projectId = createProject("重新绑定系统");
     long retainedAssetId = createAsset("常驻接口", "重新绑定系统");
@@ -161,26 +147,6 @@ class InspectionPlanPolicyApiTest {
         .filteredOn(binding -> reboundAssetId == binding.getAssetId())
         .extracting(InspectionPlanBinding::getOwnershipStatus)
         .containsExactly("RELEASED", "OWNED");
-  }
-
-  @Test
-  void 旧接口不能修改或物理删除结构化计划() throws Exception {
-    long projectId = createProject("旧接口保护系统");
-    long assetId = createAsset("旧接口保护服务", "旧接口保护系统");
-    long planId = createMonitoringPlan("受保护计划", projectId, "旧接口保护系统", List.of(assetId));
-
-    mockMvc.perform(put("/api/inspection-plans/{id}", planId)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(Map.of(
-                "name", "绕过修改", "projectName", "旧接口保护系统", "scopeText", "全部服务",
-                "scheduleText", "每小时", "nextRunAt", "2026-10-21T10:00:00"))))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.message").value("结构化巡检计划请使用 /api/monitoring-plans/{id}"));
-
-    mockMvc.perform(delete("/api/inspection-plans/{id}", planId))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.message").value("结构化巡检计划请使用 /api/monitoring-plans/{id}"));
-    mockMvc.perform(get("/api/inspection-plans/{id}", planId)).andExpect(status().isOk());
   }
 
   @Test

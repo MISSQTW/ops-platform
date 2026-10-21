@@ -48,17 +48,6 @@ npm run dev
 
 外部告警生命周期与平台处置状态分别保存。平台只在 HertzBeat 明确返回 `resolved` 时更新恢复状态，不根据活动列表缺席推断恢复。告警可确认、添加备注；外部恢复后才可关闭。同一告警的新故障周期会重新打开，处置历史保留。
 
-### 存量监控迁移
-
-- `GET /api/inspection-plans/migration-report` 只读分析旧计划、Monitor 唯一归属及双方频率，不修改外部配置。
-- `POST /api/inspection-plans/migration-proposals` 提交 `assetId`、`projectId`，必要时明确选择 `intervalSeconds`。准备阶段创建真实的待确认计划和绑定，保留 Monitor ID，但不启动同步任务；频率冲突不会自动选择权威值。
-- `GET /api/inspection-plans/migration-proposals` 查询持久化提案；`POST /api/inspection-plans/migration-proposals/{id}/confirm` 重验现场后激活同一计划，重复确认返回原计划。
-- 多个启用旧计划或重复 Monitor 映射禁止迁移。现场变化后须先调用 `POST /api/inspection-plans/migration-proposals/{id}/cancel` 释放预留，再重新准备；取消不会删除外部 Monitor。
-- 旧计划保留历史和本地兜底，只有服务对应 Monitor、规则及配置版本全部就绪后才逐服务交出执行权。旧计划仍启用时，迁移目标计划不会再启动第二份本地巡检；旧计划停用或删除后，新计划才承担必要兜底。待确认计划禁止手动执行。
-- 准备、确认、取消使用正式 PostgreSQL 的事务级表锁保护服务、计划、绑定和项目现场，提交后才进行外部同步。迁移期间配置写入可能短暂等待，获取锁超过 5 秒可重试；不会阻塞普通读取。H2 仅用于测试，不提供等价的生产迁移锁保证。
-
-迁移并发与故障注入回归：先准备独立临时 PostgreSQL 数据库，再设置 `OPS_MIGRATION_TEST_DB_URL` 并运行 `mvn -f api/pom.xml -Dtest=MonitoringMigrationPostgresTest test`。测试库名必须以 `ops_platform_migration_test_` 开头；该测试使用建表/删表配置，绝不能指向业务库。未提供测试库时该组用例跳过，不能将跳过视为 PostgreSQL 验证通过。
-
 ### 如何理解状态
 
 | 页面状态 | 含义 |
@@ -75,9 +64,7 @@ npm run dev
 
 计划同步负责下发 Monitor 频率、启停与告警规则，后台每 30 秒校验并补偿配置漂移；告警页“同步监控数据”负责拉取状态和告警，后台默认每 60 秒执行。页面刷新只读取平台已保存的数据。
 
-计划显示未同步、同步中、部分成功或失败时可手动补偿；外部不可用时保留期望配置并重试。Monitor 和规则都同步成功后，该服务停止平台本地周期检查；迁移中或同步失败的服务保留原检查兜底。
-
-旧计划显示“待迁移”。先查看迁移报告，再通过迁移提案准备与确认接口操作；旧 `POST /api/inspection-plans/migration-claims` 返回 410。普通计划创建、增加服务及重新获取所有权不能绕过存量迁移检查。
+计划显示未同步、同步中、部分成功或失败时可手动补偿；外部不可用时保留期望配置并重试。Monitor 和规则都同步成功后，该服务停止平台本地周期检查；同步失败的服务保留本地检查兜底。
 
 服务删除与计划获取服务使用共同的服务级事务锁，避免删除后产生无法清理的绑定；仍有未清理绑定时禁止删除服务。停用计划删除或移除服务时，只有已由其他计划接管的 Monitor 才保留，无人接管则预留所有权并完成外部清理，失败后保留重试载体。清理历史 Monitor 不会清空后来重建的 Monitor 映射。
 

@@ -26,11 +26,11 @@ public class InspectionPlanPolicyService {
   private final InspectionPlanBindingRepository bindings;
   private final MonitoringConfigTaskRepository tasks;
   private final ApplicationEventPublisher events;
-  private final MonitoringMigrationTopologyLock topologyLock;
+  private final MonitoringTopologyLock topologyLock;
 
   public InspectionPlanPolicyService(ProjectRepository projects, AssetRepository assets,
       InspectionPlanRepository plans, InspectionPlanBindingRepository bindings,
-      MonitoringConfigTaskRepository tasks, ApplicationEventPublisher events, MonitoringMigrationTopologyLock topologyLock) {
+      MonitoringConfigTaskRepository tasks, ApplicationEventPublisher events, MonitoringTopologyLock topologyLock) {
     this.projects = projects;
     this.assets = assets;
     this.plans = plans;
@@ -84,8 +84,6 @@ public class InspectionPlanPolicyService {
   @Transactional
   public InspectionPlanView update(Long id, InspectionPlanRequest request) {
     InspectionPlan plan = plans.findByIdForUpdate(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    if (!plan.isMonitoringPolicy()) throw new IllegalArgumentException("旧巡检计划不能使用监控策略接口修改");
-    if ("PENDING_CONFIRMATION".equals(plan.getStatus())) throw new IllegalStateException("待确认迁移计划请通过迁移确认接口操作");
     if (!"ACTIVE".equals(plan.getLifecycleStatus())) throw new IllegalStateException("删除中的巡检计划不能修改");
     Project project = projects.findById(request.projectId()).orElseThrow(() -> new NoSuchElementException("项目不存在"));
     if (!project.getId().equals(plan.getProjectId()) || !project.getName().equals(request.projectName())) {
@@ -159,8 +157,6 @@ public class InspectionPlanPolicyService {
   @Transactional
   public InspectionPlanView requestDelete(Long id) {
     InspectionPlan plan = plans.findByIdForUpdate(id).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    if ("PENDING_CONFIRMATION".equals(plan.getStatus())) throw new IllegalStateException("待确认迁移计划不能直接删除外部资源");
-    if (!plan.isMonitoringPolicy()) throw new IllegalArgumentException("旧巡检计划不支持逻辑删除");
     if ("DELETED".equals(plan.getLifecycleStatus())) return view(plan);
     plan.markDeleting();
     bindings.findByPlanIdOrderById(plan.getId()).stream()
@@ -168,53 +164,6 @@ public class InspectionPlanPolicyService {
         .forEach(binding -> binding.requestRelease(plan.getDesiredVersion()));
     enqueueAndPublish(plan);
     return view(plan);
-  }
-
-  @Transactional
-  public InspectionPlanView prepareMigration(Long projectId, Long assetId, String name, int intervalSeconds) {
-    topologyLock.acquireServices(List.of(assetId));
-    Project project = projects.findById(projectId).orElseThrow(() -> new NoSuchElementException("项目不存在"));
-    Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("服务不存在"));
-    if (!project.getName().equals(asset.getProjectName())) throw new IllegalArgumentException("服务与项目不匹配");
-    com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint());
-    if (intervalSeconds < 10 || intervalSeconds > 86400) throw new IllegalArgumentException("迁移频率必须在10秒至24小时之间");
-    if (bindings.findByActiveOwnerKey(assetId).isPresent()) throw new IllegalStateException("服务已有巡检计划或待确认迁移");
-    InspectionPlan plan = InspectionPlan.monitoring(name, projectId, project.getName(), intervalSeconds, 2, "CRITICAL");
-    plan.configureStatus("PENDING_CONFIRMATION");
-    plans.save(plan);
-    bindings.saveAndFlush(InspectionPlanBinding.pendingMigration(plan.getId(), assetId, asset.getHertzbeatMonitorId()));
-    return view(plan);
-  }
-
-  @Transactional
-  public InspectionPlanView confirmMigration(Long planId, Long assetId) {
-    InspectionPlan plan = plans.findByIdForUpdate(planId).orElseThrow(() -> new NoSuchElementException("迁移计划不存在"));
-    if (!"PENDING_CONFIRMATION".equals(plan.getStatus()) || !"ACTIVE".equals(plan.getLifecycleStatus())) {
-      throw new IllegalStateException("迁移计划不是待确认状态");
-    }
-    InspectionPlanBinding binding = bindings.findCurrentForUpdate(planId, assetId)
-        .orElseThrow(() -> new NoSuchElementException("待确认迁移绑定不存在"));
-    binding.confirmMigration();
-    plan.configureStatus("ENABLED");
-    enqueueAndPublish(plan);
-    return view(plan);
-  }
-
-  @Transactional
-  public void cancelMigration(Long planId, Long assetId) {
-    InspectionPlan plan = plans.findByIdForUpdate(planId).orElseThrow(() -> new NoSuchElementException("迁移计划不存在"));
-    if (!"PENDING_CONFIRMATION".equals(plan.getStatus())) throw new IllegalStateException("只能取消待确认迁移计划");
-    InspectionPlanBinding binding = bindings.findCurrentForUpdate(planId, assetId)
-        .orElseThrow(() -> new NoSuchElementException("待确认迁移绑定不存在"));
-    if (!"MIGRATION_PENDING".equals(binding.getOwnershipStatus())) throw new IllegalStateException("迁移绑定已不再待确认");
-    binding.releaseOwnership();
-    plan.configureStatus("DISABLED");
-    plan.markDeleted(LocalDateTime.now());
-  }
-
-  @Transactional
-  public MigrationBatchResult claimExisting(List<MigrationClaim> claims) {
-    throw new IllegalArgumentException("迁移认领入口已停用，请使用迁移提案确认");
   }
 
   @Transactional
@@ -237,7 +186,7 @@ public class InspectionPlanPolicyService {
     for (InspectionPlanBinding binding : affectedBindings) {
       if ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())) continue;
       InspectionPlan plan = lockedPlan;
-      if (plan == null || !plan.isMonitoringPolicy() || !"ACTIVE".equals(plan.getLifecycleStatus())) continue;
+      if (plan == null || !"ACTIVE".equals(plan.getLifecycleStatus())) continue;
       plan.touchDesiredVersion();
       bindings.findByPlanIdOrderById(plan.getId()).forEach(current ->
           current.advanceDesiredVersion(plan.getDesiredVersion()));
@@ -258,26 +207,14 @@ public class InspectionPlanPolicyService {
 
   private void requireOrdinaryAdmission(Asset asset) {
     if (bindings.findByActiveOwnerKey(asset.getId()).isPresent()) {
-      throw new IllegalStateException("服务已被其他启用计划接管，请先完成原计划迁移或清理");
+      throw new IllegalStateException("服务已加入其他启用计划，请先从原计划移除");
     }
-    List<InspectionPlanBinding> history = bindings.findByAssetIdOrderById(asset.getId());
-    boolean approvedDisabled = history.stream().anyMatch(binding ->
-        ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())
-            || ("PENDING_RELEASE".equals(binding.getOwnershipStatus()) && binding.getActiveOwnerKey() == null
-                && "DISABLED".equals(binding.getMonitorActualState())))
-            && asset.getHertzbeatMonitorId() != null
-            && asset.getHertzbeatMonitorId().equals(binding.getHertzbeatMonitorId()));
     requireUniqueMonitor(asset);
-    boolean legacy = plans.findAll().stream().anyMatch(plan -> !plan.isMonitoringPolicy()
-        && "ENABLED".equals(plan.getStatus()) && asset.getProjectName().equals(plan.getProjectName()));
-    if (!approvedDisabled && (asset.getHertzbeatMonitorId() != null || legacy)) {
-      throw new IllegalStateException("服务存在历史监控或旧计划，请通过迁移提案确认");
-    }
   }
 
   private void requireUniqueMonitor(Asset asset) {
     if (asset.getHertzbeatMonitorId() != null && assets.countByHertzbeatMonitorId(asset.getHertzbeatMonitorId()) != 1) {
-      throw new IllegalStateException("Monitor映射重复，请先处理迁移冲突");
+      throw new IllegalStateException("Monitor映射重复，请先修正服务监控配置");
     }
   }
 
@@ -301,8 +238,7 @@ public class InspectionPlanPolicyService {
   private InspectionPlanView view(InspectionPlan plan) {
     List<Long> assetIds = bindings.findByPlanIdOrderById(plan.getId()).stream()
         .filter(binding -> "OWNED".equals(binding.getOwnershipStatus())
-            || "DISABLED_RELEASED".equals(binding.getOwnershipStatus())
-            || "MIGRATION_PENDING".equals(binding.getOwnershipStatus()))
+            || "DISABLED_RELEASED".equals(binding.getOwnershipStatus()))
         .map(InspectionPlanBinding::getAssetId).toList();
     return new InspectionPlanView(plan.getId(), plan.getName(), plan.getProjectId(), plan.getProjectName(),
         plan.getScopeText(), plan.getScheduleText(), plan.getStatus(), plan.getNextRunAt(), plan.getIntervalSeconds(),
@@ -316,7 +252,6 @@ public class InspectionPlanPolicyService {
   }
 
   private void enqueueAndPublish(InspectionPlan plan) {
-    if ("PENDING_CONFIRMATION".equals(plan.getStatus())) return;
     LocalDateTime now = LocalDateTime.now();
     for (InspectionPlanBinding binding : bindings.findByPlanIdOrderById(plan.getId())) {
       if ("RELEASED".equals(binding.getOwnershipStatus())
@@ -336,6 +271,4 @@ public class InspectionPlanPolicyService {
       Integer failureThreshold, String alertLevel, String lifecycleStatus, String syncStatus, Long desiredVersion,
       java.time.LocalDateTime lastSyncAttemptAt, java.time.LocalDateTime lastSyncSucceededAt,
       java.time.LocalDateTime lastVerifiedAt, String syncError, List<Long> assetIds) {}
-  public record MigrationClaim(Long planId, Long assetId) {}
-  public record MigrationBatchResult(int claimed, LocalDateTime claimedAt) {}
 }
