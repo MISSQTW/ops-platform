@@ -11,6 +11,19 @@ import org.junit.jupiter.api.Test;
 class HertzBeatMonitorParametersTest {
   private final HertzBeatClient client = new HertzBeatClient(new ObjectMapper(), "http://localhost", "", "");
 
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({"http,false", "https,true"})
+  void SSL开关必须使用普通字符串类型且脱敏回读不得被当成一致(String scheme, String enabled) {
+    Asset asset = new Asset("接口", "系统", "生产", "HTTP", scheme + "://example.com/health", "UNKNOWN");
+    var params = client.monitorParameters(asset);
+    assertThat(params).contains(Map.of("field", "ssl", "paramValue", enabled, "type", 1));
+    var masked = new java.util.ArrayList<>(params);
+    int sslIndex = java.util.stream.IntStream.range(0, masked.size())
+        .filter(index -> "ssl".equals(masked.get(index).get("field"))).findFirst().orElseThrow();
+    masked.set(sslIndex, Map.of("field", "ssl", "paramValue", "******", "type", 2));
+    assertThat(client.monitorParametersMatch(asset, masked)).isFalse();
+  }
+
   @Test
   void 同主机路径变化和参数漂移必须判为不一致() {
     Asset asset = new Asset("接口", "系统", "生产", "HTTP", "https://example.com/ready", "UNKNOWN");

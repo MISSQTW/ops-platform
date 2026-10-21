@@ -55,6 +55,8 @@ VictoriaMetrics 作为独立时序组件部署；当前 Compose 未配置 HertzB
 
 规则类型必须为 `realtime_metric`，表达式必须同时限定 app、Monitor 实例 ID 和 down。计划间隔控制 Monitor intervals；配置一致性比较 host、port、uri（含查询参数）、ssl、timeout，并在下发后回读确认。HTTP 和端口契约分别有真实故障/恢复闭环证据，所有 port 类型共用同一采集与告警实现。
 
+SSL 开关的 `paramValue` 为字符串 `true/false`，参数存储编码使用 `PARAM_TYPE_STRING=1`，不能使用 `PARAM_TYPE_PASSWORD=2`。本机 HertzBeat 的 website 定义为 boolean 输入，但 MonitorParam 的存储类型没有独立 boolean 编码；type=2 会在详情响应中脱敏为 `******`，使正确的值也无法通过写后校验。遇到此类历史配置必须重新下发正确存储类型，不允许跳过或忽略 SSL 值校验。
+
 ## Monitor 创建恢复
 
 持久化服务缺少本地 Monitor ID 时，创建前按外部稳定 `assetId` 标签遍历监控列表；唯一匹配优先认领并更新，不按名称猜测，兼容已有缺少 `managedBy` 的历史标签。新写入同时标记 `managedBy=ops-platform`。重复匹配、明确属于其他管理端、列表失败或分页无法证明完整时停止写入并保留任务重试。最多查询 100 页、每页 100 条，超过上限须先治理外部监控规模，不在未知状态下继续创建。创建响应缺少 ID 时同样按标签重新核实。该协议解决外部创建成功、本地提交前崩溃造成 ID 丢失的恢复，不承诺外部 API 对任意并发手工创建提供全局唯一约束。

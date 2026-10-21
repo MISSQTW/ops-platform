@@ -601,7 +601,7 @@ public class HertzBeatClient {
       boolean ssl = "https".equalsIgnoreCase(endpoint.getScheme());
       return new MonitorTarget("website", host + ":" + port, List.of(
           param("host", host, 1), param("port", String.valueOf(port), 0), param("uri", uri, 1),
-          param("ssl", String.valueOf(ssl), 2), param("timeout", "6000", 0)));
+          param("ssl", String.valueOf(ssl), 1), param("timeout", "6000", 0)));
     }
     int port = endpoint.getPort() > 0 ? endpoint.getPort() : contract.defaultPort();
     return new MonitorTarget("port", host + ":" + port, List.of(
