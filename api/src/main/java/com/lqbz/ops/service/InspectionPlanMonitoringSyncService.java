@@ -13,7 +13,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,8 +47,7 @@ public class InspectionPlanMonitoringSyncService {
   }
 
   public SyncSummary syncPlan(Long planId) {
-    InspectionPlan plan = plans.findById(planId).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
-    enqueueCurrentVersion(plan, true);
+    self.enqueueCurrentVersion(planId, true);
     List<Long> taskIds = tasks.findByPlanIdOrderByCreatedAt(planId).stream()
         .filter(task -> "PENDING".equals(task.getStatus()) || "RETRY".equals(task.getStatus()))
         .map(MonitoringConfigTask::getId).toList();
@@ -79,6 +77,15 @@ public class InspectionPlanMonitoringSyncService {
       refreshPlanSummary(plan, now);
       return;
     }
+    boolean reservedDisabled = "DISABLED_RELEASED".equals(binding.getOwnershipStatus());
+    if (reservedDisabled) {
+      if (bindings.findByActiveOwnerKey(binding.getAssetId()).isPresent()) {
+        task.obsolete(now);
+        return;
+      }
+      binding.reserveDisabledReconciliation();
+      bindings.saveAndFlush(binding);
+    }
     task.claim(now);
     binding.markSyncing(now);
     plan.markSyncing(now);
@@ -94,6 +101,8 @@ public class InspectionPlanMonitoringSyncService {
       String message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
       binding.markSyncError(message, now);
       task.retry(now.plusSeconds(retryDelaySeconds(task.getAttemptCount())), message);
+    } finally {
+      if (reservedDisabled) binding.releaseDisabledReconciliation();
     }
     refreshPlanSummary(plan, now);
   }
@@ -109,17 +118,20 @@ public class InspectionPlanMonitoringSyncService {
         });
     plans.findAll().stream().filter(InspectionPlan::isMonitoringPolicy)
         .filter(plan -> !"DELETED".equals(plan.getLifecycleStatus()))
-        .forEach(plan -> enqueueCurrentVersion(plan, true));
+        .forEach(plan -> self.enqueueCurrentVersion(plan.getId(), true));
     List<Long> taskIds = tasks.findByStatusInAndNextAttemptAtLessThanEqualOrderByCreatedAt(
         List.of("PENDING", "RETRY"), now).stream().map(MonitoringConfigTask::getId).toList();
     taskIds.forEach(self::processTask);
   }
 
-  private void enqueueCurrentVersion(InspectionPlan plan, boolean rescheduleCompleted) {
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void enqueueCurrentVersion(Long planId, boolean rescheduleCompleted) {
+    InspectionPlan plan = plans.findByIdForUpdate(planId).orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     if ("PENDING_CONFIRMATION".equals(plan.getStatus())) return;
     for (InspectionPlanBinding binding : bindings.findByPlanIdOrderById(plan.getId())) {
-      if ("RELEASED".equals(binding.getOwnershipStatus())
-          || "DISABLED_RELEASED".equals(binding.getOwnershipStatus())) continue;
+      if ("RELEASED".equals(binding.getOwnershipStatus())) continue;
+      if ("DISABLED_RELEASED".equals(binding.getOwnershipStatus())
+          && bindings.findByActiveOwnerKey(binding.getAssetId()).isPresent()) continue;
       String operation = "DELETED".equals(binding.getRuleDesiredState()) ? "DELETE" : "UPSERT";
       MonitoringConfigTask existing = tasks.findByPlanIdAndAssetIdAndDesiredVersionAndOperation(
           plan.getId(), binding.getAssetId(), plan.getDesiredVersion(), operation).orElse(null);
@@ -130,12 +142,8 @@ public class InspectionPlanMonitoringSyncService {
         }
         continue;
       }
-      try {
-        tasks.saveAndFlush(new MonitoringConfigTask(plan.getId(), binding.getAssetId(), plan.getDesiredVersion(),
-            operation, LocalDateTime.now()));
-      } catch (DataIntegrityViolationException ignored) {
-        // 数据库唯一约束保证并发入口只保留一条任务。
-      }
+      tasks.saveAndFlush(new MonitoringConfigTask(plan.getId(), binding.getAssetId(), plan.getDesiredVersion(),
+          operation, LocalDateTime.now()));
     }
   }
 

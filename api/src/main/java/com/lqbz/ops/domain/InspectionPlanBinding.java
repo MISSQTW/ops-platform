@@ -113,6 +113,18 @@ public class InspectionPlanBinding {
     this.activeOwnerKey = null;
   }
 
+  public void reserveDisabledReconciliation() {
+    if (!"DISABLED_RELEASED".equals(ownershipStatus)) throw new IllegalStateException("只有已停用释放的绑定可以校准");
+    this.ownershipStatus = "DISABLED_RECONCILING";
+    this.activeOwnerKey = assetId;
+  }
+
+  public void releaseDisabledReconciliation() {
+    if (!"DISABLED_RECONCILING".equals(ownershipStatus)) return;
+    this.ownershipStatus = "DISABLED_RELEASED";
+    this.activeOwnerKey = null;
+  }
+
   public void reacquireOwnership(long desiredVersion) {
     if (!"DISABLED_RELEASED".equals(ownershipStatus)) throw new IllegalStateException("只有已停用释放的绑定可以重新获取所有权");
     this.desiredVersion = desiredVersion;

@@ -409,6 +409,54 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
+  void 停用后无人接管时应纠正外部监控被重新启用的漂移() throws Exception {
+    Fixture fixture = fixture("停用漂移系统", "停用漂移接口");
+    var plan = policyService.create(request("停用漂移计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(plan.id(), request("停用漂移计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    lastEnabled.set(true);
+    org.mockito.Mockito.clearInvocations(hertzBeatClient);
+    org.mockito.Mockito.doAnswer(invocation -> {
+      assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get()
+          .extracting(InspectionPlanBinding::getOwnershipStatus).isEqualTo("DISABLED_RECONCILING");
+      lastSyncedAsset.set(invocation.getArgument(0));
+      lastInterval.set(invocation.getArgument(1));
+      lastEnabled.set(false);
+      return new HertzBeatClient.SyncResult(501L, "停用校准成功");
+    }).when(hertzBeatClient).syncMonitor(any(), any(Integer.class), eq(false));
+
+    syncService.syncPlan(plan.id());
+
+    org.mockito.Mockito.verify(hertzBeatClient).syncMonitor(any(), any(Integer.class), eq(false));
+    assertThat(bindings.findByPlanIdOrderById(plan.id()).getFirst().getOwnershipStatus()).isEqualTo("DISABLED_RELEASED");
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).isEmpty();
+    assertThat(plans.findById(plan.id()).orElseThrow().getSyncStatus()).isEqualTo("SYNCED");
+  }
+
+  @Test
+  void 停用漂移校准失败后必须释放临时预留且保留重试任务() throws Exception {
+    Fixture fixture = fixture("停用漂移失败系统", "停用漂移失败接口");
+    var plan = policyService.create(request("停用漂移失败计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    policyService.update(plan.id(), request("停用漂移失败计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId()), "DISABLED"));
+    lastEnabled.set(true);
+    doThrow(new IllegalStateException("停用校准不可用")).when(hertzBeatClient)
+        .syncMonitor(any(), any(Integer.class), eq(false));
+
+    syncService.syncPlan(plan.id());
+
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).isEmpty();
+    assertThat(bindings.findByPlanIdOrderById(plan.id()).getFirst().getOwnershipStatus()).isEqualTo("DISABLED_RELEASED");
+    assertThat(tasks.findByPlanIdOrderByCreatedAt(plan.id()).stream().filter(task -> task.getStatus().equals("RETRY"))).hasSize(1);
+    var replacement = policyService.create(request("失败后接管计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    assertThat(bindings.findByActiveOwnerKey(fixture.asset().getId())).get()
+        .extracting(InspectionPlanBinding::getPlanId).isEqualTo(replacement.id());
+  }
+
+  @Test
   void 服务被新计划接管后旧停用计划不应继续下发禁用配置() throws Exception {
     Fixture fixture = fixture("接管校准系统", "接管校准接口");
     InspectionPlanPolicyService.InspectionPlanView oldPlan = policyService.create(request(
@@ -446,7 +494,8 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
-  void 新计划接管后从旧计划移除服务不得删除共享Monitor() throws Exception {
+  @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+  void 新计划接管后从旧计划移除服务不得删除共享Monitor(org.springframework.boot.test.system.CapturedOutput output) throws Exception {
     Project project = projects.save(new Project("接管移除系统", "业务系统", null, null, null, null, "RUNNING"));
     Asset retained = assets.save(new Asset("旧计划保留接口", project.getName(), "生产", "HTTP",
         "https://retained.example.com/health", "UNKNOWN"));
@@ -465,6 +514,13 @@ class InspectionPlanMonitoringSyncTest {
 
     verify(hertzBeatClient, never()).deleteMonitor(anyLong());
     assertThat(bindings.findByActiveOwnerKey(transferred.getId()).orElseThrow().getPlanId()).isEqualTo(newPlan.id());
+    assertThat(bindings.findByPlanIdOrderById(oldPlan.id()).stream()
+        .filter(binding -> binding.getAssetId().equals(transferred.getId()))).singleElement()
+        .extracting(InspectionPlanBinding::getOwnershipStatus).isEqualTo("RELEASED");
+    assertThat(tasks.findByPlanIdOrderByCreatedAt(oldPlan.id()).stream()
+        .filter(task -> task.getDesiredVersion().equals(3L)))
+        .allSatisfy(task -> assertThat(task.getStatus()).isEqualTo("SUCCEEDED"));
+    assertThat(output.getAll()).doesNotContain("no transaction is in progress");
   }
 
   @Test
