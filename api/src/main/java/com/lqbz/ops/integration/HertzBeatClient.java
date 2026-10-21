@@ -59,6 +59,7 @@ public class HertzBeatClient {
     if (token.isBlank()) throw new IllegalStateException("HertzBeat 认证失败");
     MonitorTarget target = monitorTarget(asset);
     Long existingMonitorId = asset.getHertzbeatMonitorId();
+    if (existingMonitorId == null && asset.getId() != null) existingMonitorId = findMonitorByAssetId(token, asset.getId());
     JsonNode existing = existingMonitorId == null ? null : getMonitorDetails(token, existingMonitorId);
     Map<String, Object> monitor = new LinkedHashMap<>();
     if (existingMonitorId != null) {
@@ -75,6 +76,7 @@ public class HertzBeatClient {
     monitor.put("type", 0);
     monitor.put("description", asset.getProjectName() + " / " + asset.getEnvironmentName());
     Map<String, String> labels = new LinkedHashMap<>();
+    labels.put("managedBy", "ops-platform");
     labels.put("project", asset.getProjectName());
     labels.put("environment", asset.getEnvironmentName());
     if (asset.getId() != null) labels.put("assetId", String.valueOf(asset.getId()));
@@ -95,7 +97,10 @@ public class HertzBeatClient {
       throw new IllegalStateException("HertzBeat " + action + "监控失败：" + json.path("msg").asText("HTTP " + response.statusCode()));
     }
     long monitorId = existingMonitorId == null ? json.path("data").asLong(0) : existingMonitorId;
-    if (monitorId <= 0 && existingMonitorId == null) monitorId = findMonitorId(token, asset.getName(), target.app());
+    if (monitorId <= 0 && existingMonitorId == null) {
+      Long recovered = asset.getId() == null ? null : findMonitorByAssetId(token, asset.getId());
+      monitorId = asset.getId() == null ? findMonitorId(token, asset.getName(), target.app()) : recovered == null ? 0 : recovered;
+    }
     if (monitorId <= 0) throw new IllegalStateException("HertzBeat 未返回监控 ID");
     return new SyncResult(monitorId, "同步成功");
   }
@@ -452,6 +457,97 @@ public class HertzBeatClient {
       }
       return enriched;
     }).toList();
+  }
+
+  private Long findMonitorByAssetId(String token, Long assetId) throws Exception {
+    Long matchedId = null;
+    java.util.Set<Long> seen = new java.util.HashSet<>();
+    Integer expectedPages = null;
+    Long expectedElements = null;
+    Integer expectedPageSize = null;
+    java.util.Set<String> expectedMetadata = null;
+    for (int pageIndex = 0; pageIndex < 100; pageIndex++) {
+      JsonNode data = getJson(token, "/api/monitors?pageIndex=" + pageIndex + "&pageSize=100").path("data");
+      JsonNode content = data.path("content");
+      if (!content.isArray()) throw new IllegalStateException("HertzBeat 监控列表响应缺少 content，禁止创建");
+      java.util.Set<String> metadata = new java.util.HashSet<>();
+      for (String field : List.of("totalPages", "totalElements", "size", "last", "number", "numberOfElements", "first", "empty")) {
+        if (data.has(field)) metadata.add(field);
+      }
+      if (expectedMetadata != null && !expectedMetadata.equals(metadata)) {
+        throw new IllegalStateException("HertzBeat 监控列表跨页元数据契约发生变化");
+      }
+      expectedMetadata = metadata;
+      if (data.has("first") && (!data.path("first").isBoolean() || data.path("first").asBoolean() != (pageIndex == 0))
+          || data.has("empty") && (!data.path("empty").isBoolean() || data.path("empty").asBoolean() != content.isEmpty())) {
+        throw new IllegalStateException("HertzBeat 监控列表首页或空页标识矛盾");
+      }
+      if (data.has("number") && (!data.path("number").isIntegralNumber() || !data.path("number").canConvertToInt()
+          || data.path("number").asInt(-1) != pageIndex)) {
+        throw new IllegalStateException("HertzBeat 监控列表页码不一致");
+      }
+      if (data.has("numberOfElements") && (!data.path("numberOfElements").isIntegralNumber()
+          || !data.path("numberOfElements").canConvertToLong() || data.path("numberOfElements").asLong(-1) != content.size())) {
+        throw new IllegalStateException("HertzBeat 监控列表当前页数量不一致");
+      }
+      if (data.has("size")) {
+        int size = data.path("size").asInt(-1);
+        if (!data.path("size").isIntegralNumber() || !data.path("size").canConvertToInt() || size < 1 || size > 100 || content.size() > size
+            || expectedPageSize != null && expectedPageSize != size) {
+          throw new IllegalStateException("HertzBeat 监控列表分页大小不一致");
+        }
+        expectedPageSize = size;
+      } else if (expectedPageSize != null) throw new IllegalStateException("HertzBeat 监控列表缺少分页大小");
+      if (data.has("totalElements")) {
+        long total = data.path("totalElements").asLong(-1);
+        if (!data.path("totalElements").isIntegralNumber() || !data.path("totalElements").canConvertToLong()
+            || total < 0 || expectedElements != null && expectedElements != total) {
+          throw new IllegalStateException("HertzBeat 监控列表总数发生变化");
+        }
+        expectedElements = total;
+      } else if (expectedElements != null) throw new IllegalStateException("HertzBeat 监控列表缺少总数");
+      for (JsonNode monitor : content) {
+        long monitorId = monitor.path("id").asLong(0);
+        if (monitorId <= 0 || !seen.add(monitorId)) throw new IllegalStateException("HertzBeat 监控列表含无效或重复 ID");
+        JsonNode labels = monitor.path("labels");
+        if (!String.valueOf(assetId).equals(labels.path("assetId").asText())) continue;
+        String owner = labels.path("managedBy").asText("");
+        if (!owner.isBlank() && !"ops-platform".equals(owner)) throw new IllegalStateException("HertzBeat 服务标签已属于其他管理端");
+        if (matchedId != null) throw new IllegalStateException("HertzBeat 存在重复服务监控标签，禁止认领或创建");
+        matchedId = monitorId;
+      }
+      boolean complete;
+      if (data.has("totalPages")) {
+        int totalPages = data.path("totalPages").asInt();
+        if (!data.path("totalPages").isIntegralNumber() || !data.path("totalPages").canConvertToInt()
+            || totalPages < 0 || totalPages > 100) throw new IllegalStateException("HertzBeat 监控列表分页超出安全查询范围");
+        if (expectedPages != null && expectedPages != totalPages) throw new IllegalStateException("HertzBeat 监控列表总页数发生变化");
+        expectedPages = totalPages;
+        if (totalPages == 0 && (pageIndex != 0 || !seen.isEmpty()) || totalPages > 0 && pageIndex >= totalPages) {
+          throw new IllegalStateException("HertzBeat 监控列表总页数落后于已读取范围");
+        }
+        complete = pageIndex + 1 >= totalPages;
+        if (data.has("last") && (!data.path("last").isBoolean() || data.path("last").asBoolean() != complete)) {
+          throw new IllegalStateException("HertzBeat 监控列表末页标识矛盾");
+        }
+      } else if (data.path("last").isBoolean()) {
+        if (expectedPages != null) throw new IllegalStateException("HertzBeat 监控列表缺少总页数");
+        complete = data.path("last").asBoolean();
+      } else {
+        throw new IllegalStateException("HertzBeat 监控列表缺少分页完成标识，禁止创建");
+      }
+      if (expectedElements != null && expectedPages != null) {
+        int pageSize = expectedPageSize == null ? 100 : expectedPageSize;
+        long calculatedPages = expectedElements / pageSize + (expectedElements % pageSize == 0 ? 0 : 1);
+        if (calculatedPages != expectedPages) throw new IllegalStateException("HertzBeat 监控列表页数与总数不一致");
+      }
+      if (expectedElements != null && (seen.size() > expectedElements || complete && seen.size() != expectedElements)) {
+        throw new IllegalStateException("HertzBeat 监控列表已读数量与总数不一致");
+      }
+      if (content.isEmpty() && (pageIndex > 0 || !complete)) throw new IllegalStateException("HertzBeat 监控列表后续页异常为空");
+      if (complete) return matchedId;
+    }
+    throw new IllegalStateException("HertzBeat 监控列表超过100页，无法证明唯一归属");
   }
 
   private long findMonitorId(String token, String name, String app) throws Exception {

@@ -53,6 +53,137 @@ class HertzBeatClientTest {
   }
 
   @Test
+  void 创建成功但本地未提交时重试应按服务标签认领而不是重复创建() throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    var created = new java.util.concurrent.atomic.AtomicBoolean();
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> respond(exchange, 200, created.get()
+        ? "{\"code\":0,\"data\":{\"content\":[{\"id\":321,\"name\":\"订单接口\",\"labels\":{\"assetId\":\"77\",\"managedBy\":\"ops-platform\"}}],\"totalPages\":1,\"last\":true}}"
+        : "{\"code\":0,\"data\":{\"content\":[],\"totalPages\":0,\"last\":true}}"));
+    server.removeContext("/api/monitor");
+    server.createContext("/api/monitor", exchange -> {
+      if ("GET".equals(exchange.getRequestMethod())) {
+        respond(exchange, 200, "{\"code\":0,\"data\":{\"monitor\":{\"id\":321,\"jobId\":654},\"params\":[]}}");
+      } else {
+        requests.add(capture(exchange));
+        created.set(true);
+        respond(exchange, 200, "{\"code\":0,\"data\":321}");
+      }
+    });
+
+    assertThat(client.syncMonitor(asset, 60, true).monitorId()).isEqualTo(321L);
+    HertzBeatClient restarted = new HertzBeatClient(objectMapper, "http://localhost:" + server.getAddress().getPort(), "admin", "hertzbeat");
+    assertThat(restarted.syncMonitor(asset, 60, true).monitorId()).isEqualTo(321L);
+
+    assertThat(asset.getHertzbeatMonitorId()).isNull();
+    assertThat(requests).extracting(CapturedRequest::method).containsExactly("POST", "PUT");
+    assertThat(objectMapper.readTree(requests.getFirst().body()).path("monitor").path("labels").path("managedBy").asText())
+        .isEqualTo("ops-platform");
+  }
+
+  @Test
+  void 跨分页重复服务标签必须拒绝认领且不写外部资源() throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> {
+      boolean first = exchange.getRequestURI().getQuery().contains("pageIndex=0");
+      respond(exchange, 200, "{\"code\":0,\"data\":{\"content\":[{\"id\":" + (first ? 321 : 322)
+          + ",\"name\":\"订单接口\",\"labels\":{\"assetId\":\"77\"}}],\"totalPages\":2,\"last\":" + !first + "}}");
+    });
+
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.syncMonitor(asset, 60, true)))
+        .isInstanceOf(IllegalStateException.class).hasMessageContaining("重复");
+    assertThat(requests).isEmpty();
+  }
+
+  @Test
+  void 无法核实监控列表时不得创建新监控() throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> respond(exchange, 503, "{\"code\":1,\"msg\":\"unavailable\"}"));
+
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.syncMonitor(asset, 60, true)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(requests).isEmpty();
+  }
+
+  @Test
+  void 持久化服务不得通过同名但其他服务的监控推断创建结果() throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    AtomicInteger listed = new AtomicInteger();
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> respond(exchange, 200, listed.getAndIncrement() == 0
+        ? "{\"code\":0,\"data\":{\"content\":[],\"totalPages\":0}}"
+        : "{\"code\":0,\"data\":{\"content\":[{\"id\":321,\"name\":\"订单接口\",\"labels\":{\"assetId\":\"88\"}}],\"totalPages\":1}}"));
+
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.syncMonitor(asset, 60, true)))
+        .isInstanceOf(IllegalStateException.class).hasMessageContaining("未返回监控 ID");
+    assertThat(requests).extracting(CapturedRequest::method).containsExactly("POST");
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {
+      "{\"content\":[{\"id\":321,\"labels\":{}}]}",
+      "{\"content\":[{\"id\":321,\"labels\":{}}],\"totalPages\":0}",
+      "{\"content\":[],\"totalPages\":101}",
+      "{\"content\":[],\"totalPages\":1,\"last\":false,\"totalElements\":1}",
+      "{\"content\":[],\"totalPages\":1,\"number\":1}",
+      "{\"content\":[],\"totalPages\":1,\"totalElements\":1}",
+      "{\"content\":[],\"totalPages\":0,\"first\":false}",
+      "{\"content\":[],\"totalPages\":0,\"empty\":false}",
+      "{\"content\":[],\"totalPages\":0,\"numberOfElements\":1}",
+      "{\"content\":[{\"id\":321,\"labels\":{\"assetId\":\"77\",\"managedBy\":\"other-platform\"}}],\"totalPages\":1}"
+  })
+  void 不能证明安全归属的列表必须拒绝写入(String data) throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> respond(exchange, 200, "{\"code\":0,\"data\":" + data + "}"));
+
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.syncMonitor(asset, 60, true)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(requests).isEmpty();
+  }
+
+  @Test
+  void 首页面命中但后续页失败时不得提前认领() throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> {
+      boolean first = exchange.getRequestURI().getQuery().contains("pageIndex=0");
+      respond(exchange, first ? 200 : 503, first
+          ? "{\"code\":0,\"data\":{\"content\":[{\"id\":321,\"labels\":{\"assetId\":\"77\"}}],\"totalPages\":2,\"last\":false}}"
+          : "{\"code\":1,\"msg\":\"unavailable\"}");
+    });
+
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.syncMonitor(asset, 60, true)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(requests).isEmpty();
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+  void 后页新增矛盾总页数不能认领也不能创建(boolean matchingAsset) throws Exception {
+    Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 77L);
+    server.removeContext("/api/monitors");
+    server.createContext("/api/monitors", exchange -> respond(exchange, 200,
+        exchange.getRequestURI().getQuery().contains("pageIndex=0")
+            ? "{\"code\":0,\"data\":{\"content\":[{\"id\":321,\"labels\":{\"assetId\":\""
+                + (matchingAsset ? 77 : 88) + "\"}}],\"size\":1,\"last\":false}}"
+            : "{\"code\":0,\"data\":{\"content\":[],\"size\":1,\"totalPages\":0,\"last\":true}}"));
+
+    assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> client.syncMonitor(asset, 60, true)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(requests).isEmpty();
+  }
+
+  @Test
   void HTTP资产应同步为网站监控() throws Exception {
     Asset asset = new Asset("订单接口", "订单平台", "生产", "HTTP", "https://order.example.com/health", "UNKNOWN");
 
