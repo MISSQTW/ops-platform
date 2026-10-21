@@ -73,7 +73,7 @@ public class InspectionPlanMonitoringSyncService {
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
     InspectionPlanBinding binding = bindings.findCurrentForUpdate(task.getPlanId(), task.getAssetId()).orElse(null);
     LocalDateTime now = LocalDateTime.now();
-    if (task.isObsolete(plan.getDesiredVersion()) || binding == null
+    if ("PENDING_CONFIRMATION".equals(plan.getStatus()) || task.isObsolete(plan.getDesiredVersion()) || binding == null
         || !task.getDesiredVersion().equals(binding.getDesiredVersion())) {
       task.obsolete(now);
       refreshPlanSummary(plan, now);
@@ -116,6 +116,7 @@ public class InspectionPlanMonitoringSyncService {
   }
 
   private void enqueueCurrentVersion(InspectionPlan plan, boolean rescheduleCompleted) {
+    if ("PENDING_CONFIRMATION".equals(plan.getStatus())) return;
     for (InspectionPlanBinding binding : bindings.findByPlanIdOrderById(plan.getId())) {
       if ("RELEASED".equals(binding.getOwnershipStatus())
           || "DISABLED_RELEASED".equals(binding.getOwnershipStatus())) continue;

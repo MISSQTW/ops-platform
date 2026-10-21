@@ -34,6 +34,26 @@ class InspectionExecutionServiceTest {
   }
 
   @Test
+  void 迁移失败期间新计划不应与启用旧计划重复调度() {
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    AssetRepository assets = mock(AssetRepository.class);
+    InspectionRepository inspections = mock(InspectionRepository.class);
+    InspectionItemRepository items = mock(InspectionItemRepository.class);
+    InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
+    InspectionPlan owner = monitoringPlan(11L);
+    InspectionPlan legacy = new InspectionPlan("旧计划", "支付系统", "全部服务", "每 1 分钟", "ENABLED", LocalDateTime.now());
+    when(plans.findAll()).thenReturn(List.of(legacy, owner));
+    when(plans.findByStatusAndNextRunAtLessThanEqualOrderByNextRunAt(any(), any())).thenReturn(List.of(owner));
+    when(assets.findByProjectNameOrderById("支付系统")).thenReturn(List.of(asset(21L, "UNKNOWN")));
+
+    new InspectionExecutionService(plans, assets, inspections, items, bindings).executeDuePlans();
+
+    verify(inspections, never()).save(any());
+    verify(items, never()).save(any());
+    assertThat(owner.getNextRunAt()).isAfter(LocalDateTime.now());
+  }
+
+  @Test
   void 新监控计划应立即进入本地兜底调度() {
     InspectionPlan plan = InspectionPlan.monitoring("核心服务巡检", 1L, "支付系统", 60, 3, "CRITICAL");
 
@@ -127,6 +147,9 @@ class InspectionExecutionServiceTest {
     InspectionExecutionService execution = new InspectionExecutionService(
         plans, assets, inspections, inspectionItems, bindings);
     InspectionPlan plan = monitoringPlan(12L);
+    InspectionPlan disabledLegacy = new InspectionPlan("已停用旧计划", "支付系统", "全部服务", "每 1 分钟",
+        "DISABLED", LocalDateTime.now());
+    when(plans.findAll()).thenReturn(List.of(plan, disabledLegacy));
     Asset asset = asset(22L, "HEALTHY");
     InspectionPlanBinding binding = InspectionPlanBinding.managed(12L, 22L, plan.getDesiredVersion());
     binding.markMonitorSynchronized(32L, true, LocalDateTime.now());

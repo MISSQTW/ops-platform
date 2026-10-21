@@ -47,6 +47,12 @@ public class ApiExceptionHandler {
     return Map.of("message", "数据正在被并发修改，请重试", "errors", List.of());
   }
 
+  @ExceptionHandler(org.springframework.dao.PessimisticLockingFailureException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public Map<String, Object> lockConflict(org.springframework.dao.PessimisticLockingFailureException exception) {
+    return Map.of("message", "配置正在被其他事务修改，请稍后重试", "errors", List.of());
+  }
+
   @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
   @ResponseStatus(HttpStatus.CONFLICT)
   public Map<String, Object> optimisticConflict(ObjectOptimisticLockingFailureException exception) {

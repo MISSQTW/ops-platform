@@ -14,6 +14,52 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MonitoringPolicyMigrationServiceTest {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({
+      "0,true,false,60,UNIQUE_MONITOR_WITHOUT_PLAN",
+      "1,false,false,60,LEGACY_PLAN_WITHOUT_MONITOR",
+      "2,true,false,60,MULTIPLE_LEGACY_PLANS",
+      "1,true,false,120,FREQUENCY_CONFLICT",
+      "1,true,true,60,MONITOR_MISSING",
+      "1,true,false,60,LEGACY_MONITOR_MATCHED"
+  })
+  void 报告应区分旧计划与外部监控的迁移场景(int legacyCount, boolean hasMonitor,
+      boolean missing, int externalInterval, String expectedReason) throws Exception {
+    AssetRepository assets = mock(AssetRepository.class);
+    InspectionPlanRepository plans = mock(InspectionPlanRepository.class);
+    InspectionPlanBindingRepository bindings = mock(InspectionPlanBindingRepository.class);
+    var client = mock(com.lqbz.ops.integration.HertzBeatClient.class);
+    Asset asset = new Asset("订单接口", "订单系统", "生产", "HTTP", "https://example.com", "UNKNOWN");
+    if (hasMonitor) asset.markSynced(123L, "已同步");
+    when(assets.findAll()).thenReturn(List.of(asset));
+    when(plans.findAll()).thenReturn(java.util.stream.IntStream.range(0, legacyCount)
+        .mapToObj(index -> new InspectionPlan("旧计划" + index, "订单系统", "全部服务", "每 1 分钟",
+            "ENABLED", LocalDateTime.now())).toList());
+    when(bindings.findByActiveOwnerKey(null)).thenReturn(java.util.Optional.empty());
+    if (missing) {
+      when(client.getMonitorConfig(123L)).thenThrow(
+          new com.lqbz.ops.integration.HertzBeatClient.MonitorNotFoundException(123L));
+    } else {
+      when(client.getMonitorConfig(123L)).thenReturn(new com.lqbz.ops.integration.HertzBeatClient.MonitorConfig(
+          123L, "订单接口", "website", "example.com:443", externalInterval, "fixed", true,
+          java.util.Map.of(), List.of()));
+    }
+
+    var report = new MonitoringPolicyMigrationService(assets, plans, bindings, client).dryRun();
+
+    assertThat(report.items()).singleElement().satisfies(item -> {
+      assertThat(item.reason()).isEqualTo(expectedReason);
+      assertThat(item.status()).isEqualTo("MIGRATION_REQUIRED");
+      assertThat(item.legacyPlanIds()).hasSize(legacyCount);
+      if ("FREQUENCY_CONFLICT".equals(expectedReason)) {
+        assertThat(item.legacyIntervalSeconds()).isEqualTo(60);
+        assertThat(item.monitorIntervalSeconds()).isEqualTo(120);
+      }
+    });
+    if (hasMonitor && legacyCount <= 1) org.mockito.Mockito.verify(client).getMonitorConfig(123L);
+    org.mockito.Mockito.verifyNoMoreInteractions(client);
+  }
+
   @Test
   void 已有Monitor但没有唯一计划时只应报告待迁移() {
     AssetRepository assets = mock(AssetRepository.class);
@@ -27,7 +73,8 @@ class MonitoringPolicyMigrationServiceTest {
     when(bindings.findByActiveOwnerKey(null)).thenReturn(java.util.Optional.empty());
 
     MonitoringPolicyMigrationService.MigrationReport report =
-        new MonitoringPolicyMigrationService(assets, plans, bindings).dryRun();
+        new MonitoringPolicyMigrationService(assets, plans, bindings,
+            mock(com.lqbz.ops.integration.HertzBeatClient.class)).dryRun();
 
     assertThat(report.items()).singleElement().satisfies(item -> {
       assertThat(item.serviceName()).isEqualTo("订单接口");

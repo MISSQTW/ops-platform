@@ -89,6 +89,23 @@ class InspectionPlanMonitoringSyncTest {
   }
 
   @Test
+  void 待确认迁移计划不得通过手动同步或定时校准改变外部资源() throws Exception {
+    Fixture fixture = fixture("待确认迁移系统", "待确认迁移接口");
+    var plan = policyService.prepareMigration(fixture.project().getId(), fixture.asset().getId(), "待确认计划", 60);
+
+    syncService.syncPlan(plan.id());
+    syncService.reconcile();
+    policyService.updateAsset(fixture.asset().getId(), "更新待确认接口", fixture.project().getName(), "生产",
+        "HTTP", "https://changed.example.com/health", "UNKNOWN");
+
+    assertThat(tasks.findByPlanIdOrderByCreatedAt(plan.id())).isEmpty();
+    assertThat(plans.findById(plan.id()).orElseThrow().getStatus()).isEqualTo("PENDING_CONFIRMATION");
+    org.mockito.Mockito.verify(hertzBeatClient, org.mockito.Mockito.never()).syncMonitor(any(), any(Integer.class), any(Boolean.class));
+    org.mockito.Mockito.verify(hertzBeatClient, org.mockito.Mockito.never()).upsertAlertRule(any());
+    assertThatThrownBy(() -> policyService.requestDelete(plan.id())).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
   void 保存计划后应自动同步Monitor和告警规则() throws Exception {
     Fixture fixture = fixture("自动同步系统", "自动同步接口");
 
