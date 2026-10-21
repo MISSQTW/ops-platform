@@ -175,6 +175,9 @@ public class ResourceController {
     return asset;
   }
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.lqbz.ops.inspection.InspectionProfileRepository inspectionProfiles;
+
   @DeleteMapping("/assets/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   @Transactional
@@ -185,6 +188,7 @@ public class ResourceController {
       throw new IllegalStateException("服务已加入巡检计划，请先从计划中移除并完成监控清理");
     }
     monitoringCleanupService.cleanupOrSchedule(asset);
+    if (inspectionProfiles != null) inspectionProfiles.findById(id).ifPresent(inspectionProfiles::delete);
     assets.delete(asset);
     audits.save(new AuditLog("DELETE_ASSET", "ASSET", asset.getName()));
   }

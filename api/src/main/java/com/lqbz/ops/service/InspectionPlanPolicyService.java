@@ -166,6 +166,9 @@ public class InspectionPlanPolicyService {
     return view(plan);
   }
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.lqbz.ops.inspection.InspectionProfileRepository inspectionProfiles;
+
   @Transactional
   public Asset updateAsset(Long assetId, String name, String projectName, String environmentName,
       String type, String endpoint, String status) {
@@ -173,7 +176,12 @@ public class InspectionPlanPolicyService {
     InspectionPlan lockedPlan = owner == null ? null : plans.findByIdForUpdate(owner.getPlanId()).orElse(null);
     List<InspectionPlanBinding> affectedBindings = lockedPlan == null ? List.of()
         : bindings.findCurrentForUpdate(lockedPlan.getId(), assetId).stream().toList();
+    topologyLock.acquireServices(List.of(assetId));
     Asset asset = assets.findById(assetId).orElseThrow(() -> new NoSuchElementException("服务不存在"));
+    if (inspectionProfiles != null && !asset.getType().equals(type)
+        && inspectionProfiles.findById(assetId).map(com.lqbz.ops.inspection.InspectionProfile::isEnabled).orElse(false)) {
+      throw new IllegalStateException("请先停用深度巡检配置再修改服务类型");
+    }
     if (!asset.getProjectName().equals(projectName)
         && bindings.existsByAssetIdAndOwnershipStatusNot(assetId, "RELEASED")) {
       throw new IllegalStateException("服务仍关联巡检计划，请先移除并完成清理后再变更项目");

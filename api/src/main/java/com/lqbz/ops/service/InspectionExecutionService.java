@@ -51,7 +51,23 @@ public class InspectionExecutionService {
     this.bindings = bindings;
   }
 
-  @Transactional
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.lqbz.ops.inspection.InspectionProfileService inspectionProfiles;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.lqbz.ops.inspection.ProbeRunner probeRunner;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+
+  private final java.util.concurrent.ExecutorService checkExecutor = java.util.concurrent.Executors.newFixedThreadPool(16, Thread.ofVirtual().name("inspection-check-", 0).factory());
+  private final java.util.concurrent.ExecutorService planExecutor = java.util.concurrent.Executors.newFixedThreadPool(4, Thread.ofVirtual().name("inspection-plan-", 0).factory());
+  private final java.util.Set<Long> executingPlans = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final java.util.concurrent.Semaphore planCapacity = new java.util.concurrent.Semaphore(4);
+  @org.springframework.beans.factory.annotation.Value("${ops.inspection.async-scheduling:true}")
+  private boolean asynchronousScheduling;
+
+  @jakarta.annotation.PreDestroy
+  public void closeExecutors() { checkExecutor.shutdownNow(); planExecutor.shutdownNow(); }
+
   public Inspection execute(Long planId) {
     InspectionPlan plan = plans.findById(planId)
         .orElseThrow(() -> new NoSuchElementException("巡检计划不存在"));
@@ -69,11 +85,18 @@ public class InspectionExecutionService {
 
   @Scheduled(initialDelayString = "${ops.inspection.scheduler-initial-delay-ms:10000}",
       fixedDelayString = "${ops.inspection.scheduler-delay-ms:10000}")
-  @Transactional
   public void executeDuePlans() {
     LocalDateTime now = LocalDateTime.now();
     for (InspectionPlan plan : plans.findByStatusAndNextRunAtLessThanEqualOrderByNextRunAt("ENABLED", now)) {
-      execute(plan, true);
+      if (!asynchronousScheduling) { execute(plan, true); continue; }
+      if (!executingPlans.add(plan.getId())) continue;
+      if (!planCapacity.tryAcquire()) { executingPlans.remove(plan.getId()); continue; }
+      planExecutor.submit(() -> {
+        try { execute(plan, true); }
+        catch (RuntimeException ignored) {
+          // 单个计划发生配置竞争或数据库异常时，下轮重试，不中断其他计划。
+        } finally { executingPlans.remove(plan.getId()); planCapacity.release(); }
+      });
     }
   }
 
@@ -81,26 +104,51 @@ public class InspectionExecutionService {
     long startedAt = System.nanoTime();
     List<Asset> projectAssets = executionAssets(plan, scheduled);
     if (projectAssets.isEmpty()) {
-      if (scheduled) plan.scheduleNextRun(calculateNextRun(plan.getScheduleText(), LocalDateTime.now()));
+      if (scheduled) { plan.scheduleNextRun(calculateNextRun(plan.getScheduleText(), LocalDateTime.now())); plans.save(plan); }
       return null;
     }
-    List<AddressTestResult> results = projectAssets.stream().map(this::testAddress).toList();
-    int passedChecks = (int) results.stream().filter(AddressTestResult::passed).count();
-    String status = !results.isEmpty() && passedChecks == results.size() ? "PASSED" : "FAILED";
-    long durationSeconds = Math.max(1, Duration.ofNanos(System.nanoTime() - startedAt).toSeconds());
-    Inspection inspection = inspections.save(new Inspection(plan.getName(), plan.getProjectName(), status,
-        passedChecks, results.size(), durationSeconds, LocalDateTime.now()));
-
-    for (int index = 0; index < projectAssets.size(); index++) {
-      Asset asset = projectAssets.get(index);
-      AddressTestResult result = results.get(index);
-      asset.applyInspectionStatus(result.passed() ? "HEALTHY" : "CRITICAL");
-      inspectionItems.save(new InspectionItem(inspection.getId(), asset.getType(), asset.getName(),
-          checkName(asset), result.passed() ? "PASSED" : "FAILED", result.message(), result.durationMillis()));
-    }
-
-    if (scheduled) plan.scheduleNextRun(calculateNextRun(plan.getScheduleText(), LocalDateTime.now()));
-    return inspection;
+    List<java.util.concurrent.CompletableFuture<AssetChecks>> pending = projectAssets.stream().map(asset ->
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+          boolean deep = inspectionProfiles != null && inspectionProfiles.enabled(asset.getId());
+          try {
+            if (deep) return new AssetChecks(asset, true, probeRunner.run(asset.getId(), true, false));
+            AddressTestResult result = testAddress(asset);
+            return new AssetChecks(asset, false, List.of(new com.lqbz.ops.inspection.ProbeCheck(asset.getType(),
+                checkName(asset), asset.getName(), result.passed(), result.message(), result.durationMillis())));
+          } catch (RuntimeException exception) {
+            return new AssetChecks(asset, deep, com.lqbz.ops.inspection.ProbeRegistry.failure(asset, "检查配置或计划归属已变化，本项未通过"));
+          }
+        }, checkExecutor)).toList();
+    List<AssetChecks> grouped = pending.stream().map(java.util.concurrent.CompletableFuture::join).toList();
+    List<com.lqbz.ops.inspection.ProbeCheck> results = grouped.stream().flatMap(group -> group.checks().stream()).toList();
+    java.util.function.Supplier<Inspection> persist = () -> {
+      int passedChecks = (int) results.stream().filter(com.lqbz.ops.inspection.ProbeCheck::passed).count();
+      String status = !results.isEmpty() && passedChecks == results.size() ? "PASSED" : "FAILED";
+      long durationSeconds = Math.max(1, Duration.ofNanos(System.nanoTime() - startedAt).toSeconds());
+      Inspection inspection = inspections.save(new Inspection(plan.getName(), plan.getProjectName(), status,
+          passedChecks, results.size(), durationSeconds, LocalDateTime.now()));
+      for (com.lqbz.ops.inspection.ProbeCheck result : results) {
+        inspectionItems.save(new InspectionItem(inspection.getId(), result.category(), result.target(), result.name(),
+            result.passed() ? "PASSED" : "FAILED", result.message(), result.durationMillis()));
+      }
+      for (AssetChecks group : grouped) {
+        // 用服务ID和开始执行时的检查模式关联结果，名称和配置变更不能改变身份。
+        if (group.deep()) continue;
+        Asset original = group.asset();
+        Asset current = assets.findById(original.getId()).orElse(original);
+        if (!current.getType().equals(original.getType()) || !current.getEndpoint().equals(original.getEndpoint())) continue;
+        boolean passed = !group.checks().isEmpty() && group.checks().stream().allMatch(com.lqbz.ops.inspection.ProbeCheck::passed);
+        current.applyInspectionStatus(passed ? "HEALTHY" : "CRITICAL");
+        assets.save(current);
+      }
+      if (scheduled) {
+        InspectionPlan current = plans.findById(plan.getId()).orElse(plan);
+        current.scheduleNextRun(calculateNextRun(current.getScheduleText(), LocalDateTime.now()));
+        plans.save(current);
+      }
+      return inspection;
+    };
+    return transactionTemplate == null ? persist.get() : transactionTemplate.execute(status -> persist.get());
   }
 
   private List<Asset> executionAssets(InspectionPlan plan, boolean scheduled) {
@@ -111,9 +159,9 @@ public class InspectionExecutionService {
     return projectAssets.stream()
         .filter(asset -> {
           InspectionPlanBinding binding = planBindings.get(asset.getId());
-          return binding != null && (scheduled
-              ? !binding.isHertzBeatReady(plan.getDesiredVersion())
-              : "OWNED".equals(binding.getOwnershipStatus()) && "ENABLED".equals(binding.getMonitorDesiredState()));
+          return binding != null && "OWNED".equals(binding.getOwnershipStatus())
+              && "ENABLED".equals(binding.getMonitorDesiredState())
+              && (!scheduled || !binding.isHertzBeatReady(plan.getDesiredVersion()));
         })
         .toList();
   }
@@ -179,7 +227,7 @@ public class InspectionExecutionService {
   }
 
   private String checkName(Asset asset) {
-    return "HTTP".equalsIgnoreCase(asset.getType()) ? "健康接口" : asset.getType() + " 连接";
+    return "HTTP".equalsIgnoreCase(asset.getType()) ? "基础HTTP可用性" : asset.getType() + " 基础端口连接";
   }
 
   private long elapsedMillis(long startedAt) {
@@ -208,6 +256,8 @@ public class InspectionExecutionService {
     }
     return now.plusHours(1);
   }
+
+  private record AssetChecks(Asset asset, boolean deep, List<com.lqbz.ops.inspection.ProbeCheck> checks) {}
 
   public record AddressTestResult(boolean passed, String message, long durationMillis) {}
   private record HostPort(String host, int port) {}

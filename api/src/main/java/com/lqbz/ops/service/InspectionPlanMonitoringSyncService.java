@@ -279,13 +279,14 @@ public class InspectionPlanMonitoringSyncService {
   }
 
   private boolean monitorMatches(HertzBeatClient.MonitorConfig config, InspectionPlan plan, Asset asset,
-      boolean enabled) {
+      boolean enabled) throws Exception {
     if (config == null) return false;
     HertzBeatClient.MetricTarget target = hertzBeatClient.metricTarget(asset);
     return asset.getName().equals(config.name()) && target.app().equals(config.app())
         && target.instance().equals(config.instance()) && plan.getIntervalSeconds() == config.intervalSeconds()
         && "fixed".equals(config.scheduleType()) && enabled == config.enabled()
         && hertzBeatClient.monitorParametersMatch(asset, config.params())
+        && hertzBeatClient.monitorCredentialsMatch(asset, config.id())
         && String.valueOf(asset.getId()).equals(config.labels().get("assetId"))
         && asset.getProjectName().equals(config.labels().get("project"))
         && asset.getEnvironmentName().equals(config.labels().get("environment"));

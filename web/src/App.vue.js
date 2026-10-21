@@ -1,3 +1,4 @@
+import InspectionProfilePanel from './InspectionProfilePanel.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, ShieldCheck, Trash2, XCircle } from '@lucide/vue';
@@ -4424,6 +4425,17 @@ function __VLS_template() {
                     showIcon: (true),
                 }, ...__VLS_functionalComponentArgsRest(__VLS_1183));
             }
+            // @ts-ignore
+            /** @type { [typeof InspectionProfilePanel, ] } */ ;
+            // @ts-ignore
+            const __VLS_1188 = __VLS_asFunctionalComponent(InspectionProfilePanel, new InspectionProfilePanel({
+                key: ((__VLS_ctx.monitoringDetails.asset.id)),
+                asset: ((__VLS_ctx.monitoringDetails.asset)),
+            }));
+            const __VLS_1189 = __VLS_1188({
+                key: ((__VLS_ctx.monitoringDetails.asset.id)),
+                asset: ((__VLS_ctx.monitoringDetails.asset)),
+            }, ...__VLS_functionalComponentArgsRest(__VLS_1188));
             if (!__VLS_ctx.monitoringDetails.latestMetrics.length) {
                 __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     ...{ class: ("empty-trend") },
@@ -4474,20 +4486,20 @@ function __VLS_template() {
                 __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                     key: ((item.id)),
                 });
-                const __VLS_1188 = {}.ElTag;
+                const __VLS_1193 = {}.ElTag;
                 /** @type { [typeof __VLS_components.ElTag, typeof __VLS_components.elTag, typeof __VLS_components.ElTag, typeof __VLS_components.elTag, ] } */ ;
                 // @ts-ignore
-                const __VLS_1189 = __VLS_asFunctionalComponent(__VLS_1188, new __VLS_1188({
+                const __VLS_1194 = __VLS_asFunctionalComponent(__VLS_1193, new __VLS_1193({
                     type: ((__VLS_ctx.badge(item.level))),
                     size: ("small"),
                 }));
-                const __VLS_1190 = __VLS_1189({
+                const __VLS_1195 = __VLS_1194({
                     type: ((__VLS_ctx.badge(item.level))),
                     size: ("small"),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_1189));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_1194));
                 (__VLS_ctx.statusText(item.level));
-                __VLS_1193.slots.default;
-                var __VLS_1193;
+                __VLS_1198.slots.default;
+                var __VLS_1198;
                 __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
                 (item.message);
                 __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -4503,19 +4515,19 @@ function __VLS_template() {
             __VLS_elementAsFunction(__VLS_intrinsicElements.template, __VLS_intrinsicElements.template)({});
             {
                 const { footer: __VLS_thisSlot } = __VLS_1175.slots;
-                const __VLS_1194 = {}.ElButton;
+                const __VLS_1199 = {}.ElButton;
                 /** @type { [typeof __VLS_components.ElButton, typeof __VLS_components.elButton, typeof __VLS_components.ElButton, typeof __VLS_components.elButton, ] } */ ;
                 // @ts-ignore
-                const __VLS_1195 = __VLS_asFunctionalComponent(__VLS_1194, new __VLS_1194({
+                const __VLS_1200 = __VLS_asFunctionalComponent(__VLS_1199, new __VLS_1199({
                     ...{ 'onClick': {} },
                     type: ("primary"),
                 }));
-                const __VLS_1196 = __VLS_1195({
+                const __VLS_1201 = __VLS_1200({
                     ...{ 'onClick': {} },
                     type: ("primary"),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_1195));
-                let __VLS_1200;
-                const __VLS_1201 = {
+                }, ...__VLS_functionalComponentArgsRest(__VLS_1200));
+                let __VLS_1205;
+                const __VLS_1206 = {
                     onClick: (...[$event]) => {
                         if (!(!((__VLS_ctx.authLoading))))
                             return;
@@ -4526,29 +4538,29 @@ function __VLS_template() {
                         __VLS_ctx.openAssetPlanConfiguration(__VLS_ctx.monitoringDetails.asset);
                     }
                 };
-                let __VLS_1197;
-                let __VLS_1198;
+                let __VLS_1202;
+                let __VLS_1203;
                 (__VLS_ctx.currentServicePlan(__VLS_ctx.monitoringDetails.asset) ? '查看巡检计划' : '新增巡检计划');
-                __VLS_1199.slots.default;
-                var __VLS_1199;
+                __VLS_1204.slots.default;
+                var __VLS_1204;
             }
         }
         var __VLS_1175;
-        const __VLS_1202 = {}.ElDrawer;
+        const __VLS_1207 = {}.ElDrawer;
         /** @type { [typeof __VLS_components.ElDrawer, typeof __VLS_components.elDrawer, typeof __VLS_components.ElDrawer, typeof __VLS_components.elDrawer, ] } */ ;
         // @ts-ignore
-        const __VLS_1203 = __VLS_asFunctionalComponent(__VLS_1202, new __VLS_1202({
+        const __VLS_1208 = __VLS_asFunctionalComponent(__VLS_1207, new __VLS_1207({
             modelValue: ((__VLS_ctx.alertDrawerVisible)),
             title: ((__VLS_ctx.selectedAlert ? `告警详情 · ${__VLS_ctx.selectedAlert.targetNameSnapshot || __VLS_ctx.selectedAlert.targetName}` : '告警详情')),
             size: ((__VLS_ctx.alertDrawerSize)),
             appendToBody: (true),
         }));
-        const __VLS_1204 = __VLS_1203({
+        const __VLS_1209 = __VLS_1208({
             modelValue: ((__VLS_ctx.alertDrawerVisible)),
             title: ((__VLS_ctx.selectedAlert ? `告警详情 · ${__VLS_ctx.selectedAlert.targetNameSnapshot || __VLS_ctx.selectedAlert.targetName}` : '告警详情')),
             size: ((__VLS_ctx.alertDrawerSize)),
             appendToBody: (true),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_1203));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_1208));
         if (__VLS_ctx.selectedAlert) {
             __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: ("alert-detail") },
@@ -4559,36 +4571,36 @@ function __VLS_template() {
             });
             __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
             __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-            const __VLS_1208 = {}.ElTag;
+            const __VLS_1213 = {}.ElTag;
             /** @type { [typeof __VLS_components.ElTag, typeof __VLS_components.elTag, typeof __VLS_components.ElTag, typeof __VLS_components.elTag, ] } */ ;
             // @ts-ignore
-            const __VLS_1209 = __VLS_asFunctionalComponent(__VLS_1208, new __VLS_1208({
+            const __VLS_1214 = __VLS_asFunctionalComponent(__VLS_1213, new __VLS_1213({
                 type: ((__VLS_ctx.selectedAlert.externalLifecycle === 'RESOLVED' ? 'success' : 'danger')),
                 effect: ("plain"),
             }));
-            const __VLS_1210 = __VLS_1209({
+            const __VLS_1215 = __VLS_1214({
                 type: ((__VLS_ctx.selectedAlert.externalLifecycle === 'RESOLVED' ? 'success' : 'danger')),
                 effect: ("plain"),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_1209));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_1214));
             (__VLS_ctx.statusText(__VLS_ctx.selectedAlert.externalLifecycle || 'FIRING'));
-            __VLS_1213.slots.default;
-            var __VLS_1213;
+            __VLS_1218.slots.default;
+            var __VLS_1218;
             __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
             __VLS_elementAsFunction(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
-            const __VLS_1214 = {}.ElTag;
+            const __VLS_1219 = {}.ElTag;
             /** @type { [typeof __VLS_components.ElTag, typeof __VLS_components.elTag, typeof __VLS_components.ElTag, typeof __VLS_components.elTag, ] } */ ;
             // @ts-ignore
-            const __VLS_1215 = __VLS_asFunctionalComponent(__VLS_1214, new __VLS_1214({
+            const __VLS_1220 = __VLS_asFunctionalComponent(__VLS_1219, new __VLS_1219({
                 type: ((__VLS_ctx.badge(__VLS_ctx.selectedAlert.handlingStatus))),
                 effect: ("light"),
             }));
-            const __VLS_1216 = __VLS_1215({
+            const __VLS_1221 = __VLS_1220({
                 type: ((__VLS_ctx.badge(__VLS_ctx.selectedAlert.handlingStatus))),
                 effect: ("light"),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_1215));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_1220));
             (__VLS_ctx.statusText(__VLS_ctx.selectedAlert.handlingStatus));
-            __VLS_1219.slots.default;
-            var __VLS_1219;
+            __VLS_1224.slots.default;
+            var __VLS_1224;
             __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 ...{ class: ("alert-message") },
             });
@@ -4630,21 +4642,21 @@ function __VLS_template() {
                 ...{ class: ("alert-actions") },
             });
             if (__VLS_ctx.selectedAlert.handlingStatus === 'OPEN') {
-                const __VLS_1220 = {}.ElButton;
+                const __VLS_1225 = {}.ElButton;
                 /** @type { [typeof __VLS_components.ElButton, typeof __VLS_components.elButton, typeof __VLS_components.ElButton, typeof __VLS_components.elButton, ] } */ ;
                 // @ts-ignore
-                const __VLS_1221 = __VLS_asFunctionalComponent(__VLS_1220, new __VLS_1220({
+                const __VLS_1226 = __VLS_asFunctionalComponent(__VLS_1225, new __VLS_1225({
                     ...{ 'onClick': {} },
                     type: ("primary"),
                     loading: ((__VLS_ctx.alertActionLoading)),
                 }));
-                const __VLS_1222 = __VLS_1221({
+                const __VLS_1227 = __VLS_1226({
                     ...{ 'onClick': {} },
                     type: ("primary"),
                     loading: ((__VLS_ctx.alertActionLoading)),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_1221));
-                let __VLS_1226;
-                const __VLS_1227 = {
+                }, ...__VLS_functionalComponentArgsRest(__VLS_1226));
+                let __VLS_1231;
+                const __VLS_1232 = {
                     onClick: (...[$event]) => {
                         if (!(!((__VLS_ctx.authLoading))))
                             return;
@@ -4657,24 +4669,24 @@ function __VLS_template() {
                         __VLS_ctx.handleAlertAction('acknowledge');
                     }
                 };
-                let __VLS_1223;
-                let __VLS_1224;
-                __VLS_1225.slots.default;
-                var __VLS_1225;
+                let __VLS_1228;
+                let __VLS_1229;
+                __VLS_1230.slots.default;
+                var __VLS_1230;
             }
-            const __VLS_1228 = {}.ElButton;
+            const __VLS_1233 = {}.ElButton;
             /** @type { [typeof __VLS_components.ElButton, typeof __VLS_components.elButton, typeof __VLS_components.ElButton, typeof __VLS_components.elButton, ] } */ ;
             // @ts-ignore
-            const __VLS_1229 = __VLS_asFunctionalComponent(__VLS_1228, new __VLS_1228({
+            const __VLS_1234 = __VLS_asFunctionalComponent(__VLS_1233, new __VLS_1233({
                 ...{ 'onClick': {} },
                 loading: ((__VLS_ctx.alertActionLoading)),
             }));
-            const __VLS_1230 = __VLS_1229({
+            const __VLS_1235 = __VLS_1234({
                 ...{ 'onClick': {} },
                 loading: ((__VLS_ctx.alertActionLoading)),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_1229));
-            let __VLS_1234;
-            const __VLS_1235 = {
+            }, ...__VLS_functionalComponentArgsRest(__VLS_1234));
+            let __VLS_1239;
+            const __VLS_1240 = {
                 onClick: (...[$event]) => {
                     if (!(!((__VLS_ctx.authLoading))))
                         return;
@@ -4685,26 +4697,26 @@ function __VLS_template() {
                     __VLS_ctx.handleAlertAction('note');
                 }
             };
-            let __VLS_1231;
-            let __VLS_1232;
-            __VLS_1233.slots.default;
-            var __VLS_1233;
+            let __VLS_1236;
+            let __VLS_1237;
+            __VLS_1238.slots.default;
+            var __VLS_1238;
             if (__VLS_ctx.selectedAlert.externalLifecycle === 'RESOLVED' && __VLS_ctx.selectedAlert.handlingStatus !== 'CLOSED') {
-                const __VLS_1236 = {}.ElButton;
+                const __VLS_1241 = {}.ElButton;
                 /** @type { [typeof __VLS_components.ElButton, typeof __VLS_components.elButton, typeof __VLS_components.ElButton, typeof __VLS_components.elButton, ] } */ ;
                 // @ts-ignore
-                const __VLS_1237 = __VLS_asFunctionalComponent(__VLS_1236, new __VLS_1236({
+                const __VLS_1242 = __VLS_asFunctionalComponent(__VLS_1241, new __VLS_1241({
                     ...{ 'onClick': {} },
                     type: ("success"),
                     loading: ((__VLS_ctx.alertActionLoading)),
                 }));
-                const __VLS_1238 = __VLS_1237({
+                const __VLS_1243 = __VLS_1242({
                     ...{ 'onClick': {} },
                     type: ("success"),
                     loading: ((__VLS_ctx.alertActionLoading)),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_1237));
-                let __VLS_1242;
-                const __VLS_1243 = {
+                }, ...__VLS_functionalComponentArgsRest(__VLS_1242));
+                let __VLS_1247;
+                const __VLS_1248 = {
                     onClick: (...[$event]) => {
                         if (!(!((__VLS_ctx.authLoading))))
                             return;
@@ -4717,35 +4729,35 @@ function __VLS_template() {
                         __VLS_ctx.handleAlertAction('close');
                     }
                 };
-                let __VLS_1239;
-                let __VLS_1240;
-                __VLS_1241.slots.default;
-                var __VLS_1241;
+                let __VLS_1244;
+                let __VLS_1245;
+                __VLS_1246.slots.default;
+                var __VLS_1246;
             }
             __VLS_elementAsFunction(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
                 ...{ class: ("alert-history") },
             });
             __VLS_elementAsFunction(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
             if (__VLS_ctx.alertEvents.length) {
-                const __VLS_1244 = {}.ElTimeline;
+                const __VLS_1249 = {}.ElTimeline;
                 /** @type { [typeof __VLS_components.ElTimeline, typeof __VLS_components.elTimeline, typeof __VLS_components.ElTimeline, typeof __VLS_components.elTimeline, ] } */ ;
                 // @ts-ignore
-                const __VLS_1245 = __VLS_asFunctionalComponent(__VLS_1244, new __VLS_1244({}));
-                const __VLS_1246 = __VLS_1245({}, ...__VLS_functionalComponentArgsRest(__VLS_1245));
+                const __VLS_1250 = __VLS_asFunctionalComponent(__VLS_1249, new __VLS_1249({}));
+                const __VLS_1251 = __VLS_1250({}, ...__VLS_functionalComponentArgsRest(__VLS_1250));
                 for (const [event] of __VLS_getVForSourceType((__VLS_ctx.alertEvents))) {
-                    const __VLS_1250 = {}.ElTimelineItem;
+                    const __VLS_1255 = {}.ElTimelineItem;
                     /** @type { [typeof __VLS_components.ElTimelineItem, typeof __VLS_components.elTimelineItem, typeof __VLS_components.ElTimelineItem, typeof __VLS_components.elTimelineItem, ] } */ ;
                     // @ts-ignore
-                    const __VLS_1251 = __VLS_asFunctionalComponent(__VLS_1250, new __VLS_1250({
+                    const __VLS_1256 = __VLS_asFunctionalComponent(__VLS_1255, new __VLS_1255({
                         key: ((event.id)),
                         timestamp: ((__VLS_ctx.formatRecordTime(event.occurredAt))),
                         placement: ("top"),
                     }));
-                    const __VLS_1252 = __VLS_1251({
+                    const __VLS_1257 = __VLS_1256({
                         key: ((event.id)),
                         timestamp: ((__VLS_ctx.formatRecordTime(event.occurredAt))),
                         placement: ("top"),
-                    }, ...__VLS_functionalComponentArgsRest(__VLS_1251));
+                    }, ...__VLS_functionalComponentArgsRest(__VLS_1256));
                     __VLS_elementAsFunction(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
                     (__VLS_ctx.statusText(event.action));
                     __VLS_elementAsFunction(__VLS_intrinsicElements.p, __VLS_intrinsicElements.p)({});
@@ -4756,11 +4768,11 @@ function __VLS_template() {
                     __VLS_elementAsFunction(__VLS_intrinsicElements.small, __VLS_intrinsicElements.small)({});
                     (__VLS_ctx.statusText(event.fromStatus));
                     (__VLS_ctx.statusText(event.toStatus));
-                    __VLS_1255.slots.default;
-                    var __VLS_1255;
+                    __VLS_1260.slots.default;
+                    var __VLS_1260;
                 }
-                __VLS_1249.slots.default;
-                var __VLS_1249;
+                __VLS_1254.slots.default;
+                var __VLS_1254;
             }
             else {
                 __VLS_elementAsFunction(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
@@ -4768,8 +4780,8 @@ function __VLS_template() {
                 });
             }
         }
-        __VLS_1207.slots.default;
-        var __VLS_1207;
+        __VLS_1212.slots.default;
+        var __VLS_1212;
     }
     ['auth-loading', 'spinning', 'login-page', 'login-panel', 'login-brand', 'brand-mark', 'login-submit', 'app-shell', 'sidebar', 'brand', 'brand-mark', 'scope-label', 'nav-item', 'active', 'nav-arrow', 'sidebar-spacer', 'integration-list', 'scope-label', 'integration-dot', 'connected', 'operator', 'avatar', 'main-area', 'topbar', 'topbar-title', 'records-back', 'records-back', 'topbar-actions', 'search', 'secondary-button', 'spin-icon', 'secondary-button', 'spin-icon', 'primary-button', 'error-state', 'content', 'dashboard-view', 'metrics-grid', 'metric', 'metric-icon', 'blue', 'metric-arrow', 'metric', 'metric-icon', 'green', 'metric-arrow', 'metric', 'metric-icon', 'amber', 'metric-arrow', 'metric', 'metric-icon', 'red', 'metric-arrow', 'metric', 'metric-icon', 'cyan', 'metric-arrow', 'dashboard-grid', 'panel', 'span-two', 'panel-heading', 'text-button', 'asset-overview', 'asset-stat', 'health-bar', 'panel', 'panel-heading', 'pass-ring', 'mini-list', 'dot', 'panel', 'span-three', 'panel-heading', 'icon-button', 'alert-stream', 'alert-row', 'severity', 'alert-main', 'content', 'list-view', 'list-summary', 'page-empty', 'project-grid', 'project-card', 'project-head', 'project-symbol', 'card-actions', 'danger-action', 'project-meta', 'project-footer', 'table-panel', 'service-row-actions', 'row-actions', 'danger-action', 'inspection-center', 'plan-grid', 'is-empty', 'plan-card', 'plan-card-head', 'plan-icon', 'plan-state-tags', 'plan-service-summary', 'plan-rule-trigger', 'plan-actions', 'plan-commands', 'spin-icon', 'spin-icon', 'plan-toggle-button', 'danger-action', 'empty-state', 'plan-empty', 'records-content', 'table-panel', 'plan-empty', 'records-empty', 'inspection-pagination', 'alert-page', 'page-toolbar', 'alert-filters', 'alert-filters', 'table-panel', 'severity', 'icon-button', 'editor-form', 'form-grid', 'form-grid', 'editor-form', 'form-grid', 'production-note', 'editor-form', 'form-grid', 'form-grid', 'drawer-footer', 'project-detail', 'project-detail-summary', 'alert-context', 'project-detail-metrics', 'inspection-detail', 'detail-summary', 'detail-score', 'detail-counts', 'passed', 'warning', 'failed', 'detail-context', 'check-list', 'check-item', 'check-icon', 'check-content', 'monitoring-detail', 'monitoring-summary', 'monitoring-summary', 'empty-trend', 'monitoring-metrics', 'trend-section', 'trend-bars', 'empty-trend', 'sync-history', 'empty-trend', 'alert-detail', 'alert-state-summary', 'alert-message', 'severity', 'alert-context', 'alert-actions', 'alert-history', 'empty-trend',];
     var __VLS_slots;
@@ -4790,6 +4802,7 @@ function __VLS_template() {
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
         return {
+            InspectionProfilePanel: InspectionProfilePanel,
             Activity: Activity,
             AlertTriangle: AlertTriangle,
             ArrowLeft: ArrowLeft,

@@ -28,6 +28,8 @@ services:
     build: ./api
     environment:
       TZ: Asia/Shanghai
+      OPS_INSPECTION_MASTER_KEY: ${OPS_INSPECTION_MASTER_KEY:-}
+      OPS_INSPECTION_BRIDGE_BASE_URL: http://api:8080
       OPS_AUTH_USERNAME: ${OPS_AUTH_USERNAME:-admin}
       OPS_AUTH_PASSWORD: ${OPS_AUTH_PASSWORD:-admin123}
       OPS_AUTH_DISPLAY_NAME: ${OPS_AUTH_DISPLAY_NAME:-平台管理员}

@@ -68,6 +68,7 @@ class InspectionPlanMonitoringSyncTest {
           lastEnabled.set(invocation.getArgument(2));
           return new HertzBeatClient.SyncResult(501L, "同步成功");
         });
+    when(hertzBeatClient.monitorCredentialsMatch(any(), anyLong())).thenReturn(true);
     when(hertzBeatClient.getMonitorConfig(501L)).thenAnswer(invocation -> monitorConfig());
     when(hertzBeatClient.monitorParametersMatch(any(), any())).thenAnswer(invocation ->
         parameterClient().monitorParametersMatch(invocation.getArgument(0), invocation.getArgument(1)));
@@ -195,6 +196,20 @@ class InspectionPlanMonitoringSyncTest {
     InspectionPlanBinding binding = bindings.findByPlanIdOrderById(plan.id()).getFirst();
     assertThat(binding.getLastVerifiedAt()).isNotNull();
     assertThat(plans.findById(plan.id()).orElseThrow().getSyncStatus()).isEqualTo("SYNCED");
+  }
+
+  @Test
+  void 仅密码漂移会原位补偿而凭据未变不重置采集() throws Exception {
+    Fixture fixture = fixture("凭据校准系统", "凭据校准接口");
+    var plan = policyService.create(request("凭据校准计划", fixture.project().getId(), fixture.project().getName(),
+        List.of(fixture.asset().getId())));
+    clearInvocations(hertzBeatClient);
+    when(hertzBeatClient.monitorCredentialsMatch(any(), eq(501L))).thenReturn(false, true);
+    assertThat(syncService.syncPlan(plan.id()).status()).isEqualTo("SYNCED");
+    verify(hertzBeatClient).syncMonitor(any(), eq(300), eq(true));
+    clearInvocations(hertzBeatClient);
+    assertThat(syncService.syncPlan(plan.id()).status()).isEqualTo("SYNCED");
+    verify(hertzBeatClient, never()).syncMonitor(any(), any(Integer.class), any(Boolean.class));
   }
 
   @Test

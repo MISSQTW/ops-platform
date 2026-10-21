@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InspectionProfilePanel from './InspectionProfilePanel.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, Settings, ShieldCheck, Trash2, XCircle } from '@lucide/vue'
@@ -1003,6 +1004,7 @@ onBeforeUnmount(() => {
           <div class="monitoring-summary"><div><span>所属巡检计划</span><strong>{{ currentServicePlan(monitoringDetails.asset)?.name || '未加入计划' }}</strong></div><div><span>巡检配置</span><strong>{{ serviceInspectionConfiguration(monitoringDetails.asset).text }}</strong></div><div><span>当前告警</span><strong>{{ currentAssetAlerts(monitoringDetails.asset).length }} 个</strong></div></div>
           <el-alert v-if="monitoringDetails.asset.monitoringError" title="巡检配置异常，请检查计划配置" type="warning" :closable="false" show-icon />
           <el-alert v-else-if="monitoringDetails.asset.lastCollectedAt && serviceState(monitoringDetails.asset).text === '待检测'" title="检测结果待更新" type="info" :closable="false" show-icon />
+          <InspectionProfilePanel :key="monitoringDetails.asset.id" :asset="monitoringDetails.asset" />
           <div v-if="!monitoringDetails.latestMetrics.length" class="empty-trend">暂无检测数据</div>
           <div class="monitoring-metrics"><article v-for="metric in monitoringDetails.latestMetrics" :key="metric.name"><span>{{ metricLabel(metric.name) }}</span><strong>{{ metricValue(metric) }}</strong><small v-if="metric.collectedAt">{{ formatTime(metric.collectedAt) }}</small></article></div>
           <div class="trend-section"><h3>最近一小时响应时间</h3><div v-if="monitoringDetails.history.length" class="trend-bars"><i v-for="(point, index) in monitoringDetails.history" :key="index" :style="{ height: `${Math.max(8, Math.min(100, Number(point.value || 0) / 3))}%` }" :title="metricValue(point)" /></div><div v-else class="empty-trend">暂无趋势数据</div></div>

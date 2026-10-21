@@ -47,6 +47,43 @@ class HertzBeatClientTest {
     client = new HertzBeatClient(objectMapper, "http://localhost:" + server.getAddress().getPort(), "admin", "hertzbeat");
   }
 
+  @Test
+  void 深度巡检适配实例端口及密码遮罩但仍拒绝版本漂移() {
+    var profiles = org.mockito.Mockito.mock(com.lqbz.ops.inspection.InspectionProfileService.class);
+    var asset = new Asset("桥接", "测试", "测试", "HTTP", "http://target", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 9L);
+    org.mockito.Mockito.when(profiles.bridge(asset)).thenReturn(new com.lqbz.ops.inspection.InspectionProfileService.Bridge(
+        java.net.URI.create("http://api:8080/internal/inspection/9"), "inspection-9-r2", "derived-password"));
+    org.springframework.test.util.ReflectionTestUtils.setField(client, "inspectionProfiles", profiles);
+    assertThat(client.metricTarget(asset).instance()).isEqualTo("inspection-9:8080");
+    var actual = client.monitorParameters(asset).stream().map(p -> new java.util.HashMap<String, Object>(p)).toList();
+    actual.stream().filter(p -> "password".equals(p.get("field"))).forEach(p -> p.put("paramValue", "******"));
+    assertThat(client.monitorParametersMatch(asset, new ArrayList<>(actual))).isTrue();
+    actual.stream().filter(p -> "username".equals(p.get("field"))).forEach(p -> p.put("paramValue", "inspection-9-r1"));
+    assertThat(client.monitorParametersMatch(asset, new ArrayList<>(actual))).isFalse();
+  }
+
+  @Test
+  void 密码单独漂移通过官方单实例导出检测且不改写Monitor() throws Exception {
+    var profiles = org.mockito.Mockito.mock(com.lqbz.ops.inspection.InspectionProfileService.class);
+    var asset = new Asset("导出测试", "测试", "测试", "HTTP", "http://target", "UNKNOWN");
+    org.springframework.test.util.ReflectionTestUtils.setField(asset, "id", 9L);
+    org.mockito.Mockito.when(profiles.bridge(asset)).thenReturn(new com.lqbz.ops.inspection.InspectionProfileService.Bridge(
+        java.net.URI.create("http://api:8080/internal/inspection/9"), "inspection-9-r2", "expected-password"));
+    org.springframework.test.util.ReflectionTestUtils.setField(client, "inspectionProfiles", profiles);
+    var stored = new java.util.concurrent.atomic.AtomicReference<>("stable-ciphertext-A");
+    server.createContext("/api/monitors/export", exchange -> respond(exchange, 200,
+        "[{\"monitor\":{\"name\":\"导出测试\"},\"params\":[{\"field\":\"password\",\"type\":2,\"value\":\"" + stored.get() + "\"}]}]"));
+    assertThat(client.monitorCredentialsMatch(asset, 321)).isFalse();
+    asset.markSynced(321L, "既有测试映射");
+    client.syncMonitor(asset, 60, true);
+    assertThat(client.monitorCredentialsMatch(asset, 321)).isTrue();
+    assertThat(client.monitorCredentialsMatch(asset, 321)).isTrue();
+    stored.set("external-drift");
+    assertThat(client.monitorCredentialsMatch(asset, 321)).isFalse();
+    assertThat(requests).hasSize(1);
+  }
+
   @AfterEach
   void tearDown() {
     server.stop(0);

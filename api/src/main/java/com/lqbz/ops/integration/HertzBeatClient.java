@@ -28,6 +28,8 @@ public class HertzBeatClient {
   private final String baseUrl;
   private final String username;
   private final String password;
+  // 仅缓存已成功写入的凭据指纹；重启后首次校准重新写入一次，不保存明文或导出密文。
+  private final java.util.concurrent.ConcurrentHashMap<Long, String> writtenCredentialHashes = new java.util.concurrent.ConcurrentHashMap<>();
 
   public HertzBeatClient(ObjectMapper objectMapper,
       @Value("${ops.hertzbeat.url:http://hertzbeat:1157}") String baseUrl,
@@ -38,6 +40,9 @@ public class HertzBeatClient {
     this.username = username;
     this.password = password;
   }
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.lqbz.ops.inspection.InspectionProfileService inspectionProfiles;
 
   public Status status() {
     long startedAt = System.nanoTime();
@@ -102,6 +107,9 @@ public class HertzBeatClient {
       monitorId = asset.getId() == null ? findMonitorId(token, asset.getName(), target.app()) : recovered == null ? 0 : recovered;
     }
     if (monitorId <= 0) throw new IllegalStateException("HertzBeat 未返回监控 ID");
+    String credentialHash = credentialFingerprint(asset, monitorId);
+    if (credentialHash == null) writtenCredentialHashes.remove(monitorId);
+    else writtenCredentialHashes.put(monitorId, credentialHash);
     return new SyncResult(monitorId, "同步成功");
   }
 
@@ -273,13 +281,56 @@ public class HertzBeatClient {
     for (Map<String, Object> expected : monitorParameters(asset)) {
       List<Map<String, Object>> matching = actual.stream()
           .filter(parameter -> expected.get("field").equals(parameter.get("field"))).toList();
-      if (matching.size() != 1 || !String.valueOf(expected.get("paramValue"))
-          .equals(String.valueOf(matching.getFirst().get("paramValue")))) return false;
+      if (matching.size() != 1) return false;
+      String value = String.valueOf(matching.getFirst().get("paramValue"));
+      // HertzBeat只读API将密码固定遮罩；版本由用户名核验，实际密码由每次采集认证验证。
+      boolean maskedPassword = "password".equals(expected.get("field"))
+          && Integer.valueOf(2).equals(expected.get("type")) && "******".equals(value);
+      if (!maskedPassword && !String.valueOf(expected.get("paramValue")).equals(value)) return false;
     }
     return true;
   }
 
+  public boolean monitorCredentialsMatch(Asset asset, long monitorId) throws Exception {
+    String actual = credentialFingerprint(asset, monitorId);
+    return actual == null || actual.equals(writtenCredentialHashes.get(monitorId));
+  }
+
+  private String credentialFingerprint(Asset asset, long monitorId) throws Exception {
+    List<Map<String, Object>> expected = monitorParameters(asset).stream()
+        .filter(parameter -> Integer.valueOf(2).equals(parameter.get("type"))).toList();
+    if (expected.isEmpty()) return null;
+    // 官方单Monitor导出保留稳定的密文；将其与期望凭据一起散列，仅保留指纹。
+    try {
+      HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/monitors/export?ids=" + monitorId + "&type=JSON"))
+          .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + login()).GET().build();
+      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) throw new IllegalStateException();
+      JsonNode export = objectMapper.readTree(response.body());
+      if (!export.isArray() || export.size() != 1 || !asset.getName().equals(export.get(0).path("monitor").path("name").asText()))
+        throw new IllegalStateException();
+      List<Map<String, Object>> params = objectList(export.get(0).path("params"));
+      var digest = java.security.MessageDigest.getInstance("SHA-256");
+      for (var parameter : expected) {
+        var matches = params.stream().filter(actual -> parameter.get("field").equals(actual.get("field"))).toList();
+        if (matches.size() != 1 || matches.getFirst().get("value") == null
+            || "******".equals(matches.getFirst().get("value"))) throw new IllegalStateException();
+        for (Object part : List.of(parameter.get("field"), parameter.get("paramValue"), matches.getFirst().get("value"))) {
+          byte[] bytes = String.valueOf(part).getBytes(StandardCharsets.UTF_8);
+          digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array()); digest.update(bytes);
+        }
+      }
+      return java.util.HexFormat.of().formatHex(digest.digest());
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt(); throw new IllegalStateException("HertzBeat凭据校验已中断");
+    } catch (Exception exception) {
+      // 解析异常可能包含敏感原始响应，禁止沿异常链向外传播。
+      throw new IllegalStateException("HertzBeat凭据校验失败，请核对单Monitor导出权限与版本");
+    }
+  }
+
   public void deleteMonitor(long monitorId) throws Exception {
+    writtenCredentialHashes.remove(monitorId);
     String token = login();
     HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/monitor/" + monitorId))
         .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + token).DELETE().build();
@@ -589,6 +640,18 @@ public class HertzBeatClient {
   }
 
   private MonitorTarget monitorTarget(Asset asset) {
+    if (inspectionProfiles != null && asset.getId() != null) {
+      com.lqbz.ops.inspection.InspectionProfileService.Bridge bridge = inspectionProfiles.bridge(asset);
+      if (bridge != null) {
+        URI uri = bridge.uri();
+        int port = uri.getPort() > 0 ? uri.getPort() : "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+        return new MonitorTarget("website", "inspection-" + asset.getId() + ":" + port, List.of(
+            param("host", uri.getHost(), 1), param("port", String.valueOf(port), 0),
+            param("uri", uri.getRawPath(), 1), param("ssl", String.valueOf("https".equalsIgnoreCase(uri.getScheme())), 1),
+            param("timeout", "45000", 0), param("authType", "Basic Auth", 1),
+            param("username", bridge.username(), 1), param("password", bridge.password(), 2)));
+      }
+    }
     com.lqbz.ops.domain.MonitoringServiceContract contract =
         com.lqbz.ops.domain.MonitoringServiceContract.validate(asset.getType(), asset.getEndpoint());
     URI endpoint = URI.create(asset.getEndpoint().contains("://") ? asset.getEndpoint() : "tcp://" + asset.getEndpoint());
