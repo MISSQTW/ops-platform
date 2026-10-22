@@ -218,7 +218,7 @@ public class HertzBeatClient {
         String level = text(first(item, "priority", "level", "severity"));
         if (level.isBlank()) level = text(first(labels, "severity", "priority", "level"));
         results.add(new ExternalAlert(externalId, monitorId, level,
-            text(first(item, "content", "message", "name")), startedAt, resolvedAt, assetId > 0 ? assetId : null));
+            alertMessage(item), startedAt, resolvedAt, assetId > 0 ? assetId : null));
       }
       boolean last = data.path("last").asBoolean(false);
       int totalPages = data.path("totalPages").asInt(-1);
@@ -440,6 +440,19 @@ public class HertzBeatClient {
       values.add(value);
     });
     return values;
+  }
+
+  private String alertMessage(JsonNode item) {
+    boolean availabilityRule = false;
+    for (JsonNode candidate : List.of(item.path("content"), item.path("message"),
+        item.path("annotations").path("description"), item.path("annotations").path("summary"), item.path("name"))) {
+      String value = candidate.asText("").trim();
+      if (value.isBlank()) continue;
+      // 自动生成的规则标识不是故障详情；保留可用性语义，不猜测具体失败原因。
+      if (value.matches("ops-plan-\\d+-asset-\\d+")) { availabilityRule = true; continue; }
+      return value;
+    }
+    return availabilityRule ? "服务可用性检查失败" : "监控源未提供告警详情";
   }
 
   private JsonNode first(JsonNode node, String... fields) {

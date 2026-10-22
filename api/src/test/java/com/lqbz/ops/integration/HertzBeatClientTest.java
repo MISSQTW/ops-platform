@@ -251,6 +251,28 @@ class HertzBeatClientTest {
   }
 
   @Test
+  void 空告警正文应读取非空消息或注解并对缺失原因作明确提示() throws Exception {
+    var payload = new java.util.concurrent.atomic.AtomicReference<>("");
+    server.createContext("/api/alerts", exchange -> respond(exchange, 200, payload.get()));
+    String[][] cases = {
+        {"{\"content\": \"原始故障原因\", \"annotations\": {\"summary\": \"次要摘要\"}}", "原始故障原因"},
+        {"{\"content\": \"  \", \"message\": \"连接超时\"}", "连接超时"},
+        {"{\"content\": \"\", \"annotations\": {\"description\": \"响应状态码异常\", \"summary\": \"服务异常\"}}", "响应状态码异常"},
+        {"{\"content\": \"\", \"annotations\": {\"summary\": \"网站不可用\"}}", "网站不可用"},
+        {"{\"content\": \"\", \"annotations\": {\"summary\": \"ops-plan-1-asset-3\"}}", "服务可用性检查失败"},
+        {"{\"content\": null, \"annotations\": {}}", "监控源未提供告警详情"}
+    };
+    for (String[] example : cases) {
+      var alert = (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(example[0]);
+      alert.put("id", 42); alert.put("monitorId", 321);
+      payload.set(objectMapper.writeValueAsString(java.util.Map.of("code", 0, "data",
+          java.util.Map.of("content", java.util.List.of(alert), "last", true))));
+      assertThat(client.alerts("firing").getFirst().message()).isEqualTo(example[1]);
+      assertThat(client.alerts("resolved").getFirst().message()).isEqualTo(example[1]);
+    }
+  }
+
+  @Test
   void Redis资产应同步为端口监控() throws Exception {
     Asset asset = new Asset("订单缓存", "订单平台", "生产", "REDIS", "redis://cache.internal:6380", "UNKNOWN");
 

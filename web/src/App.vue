@@ -2,7 +2,7 @@
 import InspectionProfilePanel from './InspectionProfilePanel.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, Settings, ShieldCheck, Trash2, XCircle } from '@lucide/vue'
+import { Activity, AlertTriangle, ArrowLeft, BellRing, CalendarClock, CheckCircle2, ChevronRight, CircleGauge, Clock3, CloudCog, Database, ExternalLink, Eye, FolderKanban, HardDrive, ListChecks, LogOut, Pencil, Play, Plus, Power, RefreshCw, Search, Server, Settings, ShieldCheck, Trash2, XCircle } from '@lucide/vue'
 import { api, setAuthToken, type Alert, type AlertHandlingEvent, type Asset, type Inspection, type InspectionItem, type InspectionPlan, type MonitoringDetails, type Project, type Summary } from './api'
 import { useRoute, useRouter } from 'vue-router'
 import type { ViewKey } from './router'
@@ -141,6 +141,11 @@ const planIntervalMax = computed(() => planForm.intervalUnit === '小时' ? 24 :
 const filteredInspections = computed(() => inspections.value.filter(item => includesKeyword(item.name, item.projectName)))
 const selectedPlanInspections = computed(() => filteredInspections.value.filter(item => !selectedInspectionPlanId.value || (selectedInspectionPlan.value && item.name === selectedInspectionPlan.value.name && item.projectName === selectedInspectionPlan.value.projectName)))
 const pagedPlanInspections = computed(() => selectedPlanInspections.value.slice((inspectionPage.value - 1) * inspectionPageSize, inspectionPage.value * inspectionPageSize))
+// 历史记录可能没有正文，所有告警入口保持相同的缺失提示。
+const alertMessage = (item: Alert) => {
+  const message = item.message?.trim() || '监控源未提供告警详情'
+  return message === '服务可用性检查失败（监控源未提供详细原因）' ? '服务可用性检查失败' : message
+}
 const filteredAlerts = computed(() => {
   const severityOrder: Record<string, number> = { CRITICAL: 0, WARNING: 1, INFO: 2 }
   return alerts.value
@@ -154,7 +159,7 @@ const filteredAlerts = computed(() => {
       && (!alertAssetFilter.value || alertObjectKey(item, 'asset') === alertAssetFilter.value)
       && (!alertTimeRange.value || (new Date(item.occurredAt).getTime() >= new Date(alertTimeRange.value[0]!).getTime()
         && new Date(item.occurredAt).getTime() < new Date(alertTimeRange.value[1]!).getTime() + 1000))
-      && includesKeyword(item.message, item.projectNameSnapshot || item.projectName, item.targetNameSnapshot || item.targetName, item.inspectionPlanName || ''))
+      && includesKeyword(alertMessage(item), item.projectNameSnapshot || item.projectName, item.targetNameSnapshot || item.targetName, item.inspectionPlanName || ''))
     .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime() || (severityOrder[left.level] ?? 9) - (severityOrder[right.level] ?? 9))
 })
 
@@ -887,7 +892,7 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="panel span-three"><div class="panel-heading"><div><h2>最新告警</h2><p>按发生时间排序的运行风险</p></div><button class="icon-button" title="进入告警事件" @click="navigateTo('alerts')"><ChevronRight :size="17" /></button></div>
-            <div class="alert-stream"><div v-for="item in alerts" :key="item.id" class="alert-row"><span class="severity" :class="item.level.toLowerCase()">{{ statusText(item.level) }}</span><div class="alert-main"><strong>{{ item.message }}</strong><span>{{ item.projectName }} · {{ item.targetName }}</span></div><time>{{ formatTime(item.occurredAt) }}</time><el-tag :type="badge(item.status)" effect="light" size="small">{{ statusText(item.status) }}</el-tag></div></div>
+            <div class="alert-stream"><div v-for="item in alerts" :key="item.id" class="alert-row"><span class="severity" :class="item.level.toLowerCase()">{{ statusText(item.level) }}</span><div class="alert-main"><strong>{{ alertMessage(item) }}</strong><span>{{ item.projectName }} · {{ item.targetName }}</span></div><time>{{ formatTime(item.occurredAt) }}</time><el-tag :type="badge(item.status)" effect="light" size="small">{{ statusText(item.status) }}</el-tag></div></div>
           </section>
         </div>
       </section>
@@ -908,7 +913,7 @@ onBeforeUnmount(() => {
             <el-table-column prop="type" label="服务类型" width="120" />
             <el-table-column label="服务状态" width="120"><template #default="scope"><el-tag :type="serviceState(scope.row).type" effect="light">{{ serviceState(scope.row).text }}</el-tag></template></el-table-column>
             <el-table-column label="巡检配置" width="130"><template #default="scope"><el-tag :type="serviceInspectionConfiguration(scope.row).type" effect="light">{{ serviceInspectionConfiguration(scope.row).text }}</el-tag></template></el-table-column>
-            <el-table-column label="操作" width="250" fixed="right"><template #default="scope"><div class="service-row-actions"><el-button link type="primary" @click="openAssetPlanConfiguration(scope.row)">{{ currentServicePlan(scope.row) ? '查看巡检计划' : '新增巡检计划' }}</el-button><div class="row-actions"><button title="服务详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></div></template></el-table-column>
+            <el-table-column label="操作" width="160" fixed="right"><template #default="scope"><div class="row-actions"><button :title="currentServicePlan(scope.row) ? '查看巡检计划' : '新增巡检计划'" :aria-label="currentServicePlan(scope.row) ? '查看巡检计划' : '新增巡检计划'" @click="openAssetPlanConfiguration(scope.row)"><ListChecks :size="15" /></button><button title="服务详情" @click="openMonitoringDetails(scope.row)"><Activity :size="15" /></button><button title="编辑服务" @click="openAssetEdit(scope.row)"><Pencil :size="15" /></button><button title="删除服务" class="danger-action" @click="removeAsset(scope.row)"><Trash2 :size="15" /></button></div></template></el-table-column>
           </el-table>
         </div>
 
@@ -926,7 +931,7 @@ onBeforeUnmount(() => {
                 <el-table-column label="检查通过" width="120"><template #default="scope">{{ scope.row.passedChecks }} / {{ scope.row.totalChecks }} 项</template></el-table-column>
                 <el-table-column label="执行时间" min-width="180"><template #default="scope">{{ formatRecordTime(scope.row.executedAt) }}</template></el-table-column>
                 <el-table-column label="执行耗时" width="110"><template #default="scope">{{ scope.row.durationSeconds }} 秒</template></el-table-column>
-                <el-table-column label="操作" width="100" fixed="right"><template #default="scope"><el-button link type="primary" @click="openInspectionDetail(scope.row)">查看详情</el-button></template></el-table-column>
+                <el-table-column label="操作" width="72" fixed="right"><template #default="scope"><div class="row-actions"><button title="查看详情" aria-label="查看详情" @click="openInspectionDetail(scope.row)"><Eye :size="15" /></button></div></template></el-table-column>
               </el-table>
             </div>
             <div v-else class="plan-empty records-empty"><Clock3 :size="26" /><strong>{{ selectedInspectionPlanId && !selectedInspectionPlan && !loading ? '巡检计划不存在或已删除' : '暂无执行记录' }}</strong></div>
@@ -946,7 +951,7 @@ onBeforeUnmount(() => {
           <div class="alert-filters"><el-select v-model="alertExternalFilter" aria-label="告警状态筛选" style="width: 140px"><el-option label="全部告警状态" value="ALL" /><el-option label="告警中" value="FIRING" /><el-option label="已恢复" value="RESOLVED" /></el-select><el-select v-model="alertHandlingFilter" aria-label="处理状态筛选" style="width: 140px"><el-option label="全部处理状态" value="ALL" /><el-option label="待处理" value="OPEN" /><el-option label="已确认" value="ACKNOWLEDGED" /><el-option label="已关闭" value="CLOSED" /></el-select></div>
           </section>
           <div class="table-panel">
-          <el-table :data="filteredAlerts" empty-text="暂无告警" stripe @row-click="openAlertDetail"><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column prop="message" label="告警内容" min-width="240" /><el-table-column label="所属项目" min-width="150"><template #default="scope">{{ scope.row.projectNameSnapshot || scope.row.projectName }}</template></el-table-column><el-table-column prop="inspectionPlanName" label="巡检计划" min-width="150"><template #default="scope">{{ scope.row.inspectionPlanName || '--' }}</template></el-table-column><el-table-column label="告警对象" min-width="150"><template #default="scope">{{ scope.row.targetNameSnapshot || scope.row.targetName }}</template></el-table-column><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="告警状态" width="100"><template #default="scope"><el-tag :type="scope.row.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(scope.row.externalLifecycle || 'FIRING') }}</el-tag></template></el-table-column><el-table-column label="处置状态" width="110"><template #default="scope"><el-tag :type="badge(scope.row.handlingStatus)" effect="light">{{ statusText(scope.row.handlingStatus) }}</el-tag></template></el-table-column><el-table-column label="操作" width="72" fixed="right"><template #default="scope"><button class="icon-button" title="查看告警详情" @click.stop="openAlertDetail(scope.row)"><ChevronRight :size="16" /></button></template></el-table-column></el-table>
+          <el-table :data="filteredAlerts" empty-text="暂无告警" stripe @row-click="openAlertDetail"><el-table-column label="级别" width="100"><template #default="scope"><span class="severity" :class="scope.row.level.toLowerCase()">{{ statusText(scope.row.level) }}</span></template></el-table-column><el-table-column label="告警内容" min-width="240"><template #default="scope">{{ alertMessage(scope.row) }}</template></el-table-column><el-table-column label="所属项目" min-width="150"><template #default="scope">{{ scope.row.projectNameSnapshot || scope.row.projectName }}</template></el-table-column><el-table-column prop="inspectionPlanName" label="巡检计划" min-width="150"><template #default="scope">{{ scope.row.inspectionPlanName || '--' }}</template></el-table-column><el-table-column label="告警服务" min-width="150"><template #default="scope">{{ scope.row.targetNameSnapshot || scope.row.targetName }}</template></el-table-column><el-table-column label="发生时间" width="150"><template #default="scope">{{ formatTime(scope.row.occurredAt) }}</template></el-table-column><el-table-column label="告警状态" width="100"><template #default="scope"><el-tag :type="scope.row.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(scope.row.externalLifecycle || 'FIRING') }}</el-tag></template></el-table-column><el-table-column label="处置状态" width="110"><template #default="scope"><el-tag :type="badge(scope.row.handlingStatus)" effect="light">{{ statusText(scope.row.handlingStatus) }}</el-tag></template></el-table-column><el-table-column label="操作" width="72" fixed="right"><template #default="scope"><button class="icon-button" title="查看告警详情" @click.stop="openAlertDetail(scope.row)"><ChevronRight :size="16" /></button></template></el-table-column></el-table>
           </div>
         </div>
       </section>
@@ -1008,7 +1013,7 @@ onBeforeUnmount(() => {
           <div v-if="!monitoringDetails.latestMetrics.length" class="empty-trend">暂无检测数据</div>
           <div class="monitoring-metrics"><article v-for="metric in monitoringDetails.latestMetrics" :key="metric.name"><span>{{ metricLabel(metric.name) }}</span><strong>{{ metricValue(metric) }}</strong><small v-if="metric.collectedAt">{{ formatTime(metric.collectedAt) }}</small></article></div>
           <div class="trend-section"><h3>最近一小时响应时间</h3><div v-if="monitoringDetails.history.length" class="trend-bars"><i v-for="(point, index) in monitoringDetails.history" :key="index" :style="{ height: `${Math.max(8, Math.min(100, Number(point.value || 0) / 3))}%` }" :title="metricValue(point)" /></div><div v-else class="empty-trend">暂无趋势数据</div></div>
-          <div class="sync-history"><h3>当前告警</h3><div v-for="item in currentAssetAlerts(monitoringDetails!.asset)" :key="item.id"><el-tag :type="badge(item.level)" size="small">{{ statusText(item.level) }}</el-tag><span>{{ item.message }}</span><span>{{ statusText(item.externalLifecycle || 'FIRING') }}</span></div><div v-if="currentAssetAlerts(monitoringDetails!.asset).length === 0" class="empty-trend">暂无当前告警</div></div>
+          <div class="sync-history"><h3>当前告警</h3><div v-for="item in currentAssetAlerts(monitoringDetails!.asset)" :key="item.id"><el-tag :type="badge(item.level)" size="small">{{ statusText(item.level) }}</el-tag><span>{{ alertMessage(item) }}</span><span>{{ statusText(item.externalLifecycle || 'FIRING') }}</span></div><div v-if="currentAssetAlerts(monitoringDetails!.asset).length === 0" class="empty-trend">暂无当前告警</div></div>
         </template>
       </div>
       <template v-if="monitoringDetails" #footer><el-button type="primary" @click="openAssetPlanConfiguration(monitoringDetails.asset)">{{ currentServicePlan(monitoringDetails.asset) ? '查看巡检计划' : '新增巡检计划' }}</el-button></template>
@@ -1017,8 +1022,8 @@ onBeforeUnmount(() => {
     <el-drawer v-model="alertDrawerVisible" :title="selectedAlert ? `告警详情 · ${selectedAlert.targetNameSnapshot || selectedAlert.targetName}` : '告警详情'" :size="alertDrawerSize" append-to-body>
       <div v-if="selectedAlert" class="alert-detail" v-loading="alertDetailLoading">
         <div class="alert-state-summary"><div><span>告警状态</span><el-tag :type="selectedAlert.externalLifecycle === 'RESOLVED' ? 'success' : 'danger'" effect="plain">{{ statusText(selectedAlert.externalLifecycle || 'FIRING') }}</el-tag></div><div><span>处理状态</span><el-tag :type="badge(selectedAlert.handlingStatus)" effect="light">{{ statusText(selectedAlert.handlingStatus) }}</el-tag></div></div>
-        <div class="alert-message"><span class="severity" :class="selectedAlert.level.toLowerCase()">{{ statusText(selectedAlert.level) }}</span><strong>{{ selectedAlert.message }}</strong></div>
-        <dl class="alert-context"><div><dt>所属项目</dt><dd>{{ selectedAlert.projectNameSnapshot || selectedAlert.projectName }}</dd></div><div><dt>巡检计划</dt><dd>{{ selectedAlert.inspectionPlanName || '--' }}</dd></div><div><dt>告警对象</dt><dd>{{ selectedAlert.targetNameSnapshot || selectedAlert.targetName }}</dd></div><div><dt>首次发生</dt><dd>{{ formatRecordTime(selectedAlert.firstOccurredAt || selectedAlert.occurredAt) }}</dd></div><div><dt>本次发生</dt><dd>{{ formatRecordTime(selectedAlert.occurredAt) }}</dd></div><div><dt>恢复时间</dt><dd>{{ selectedAlert.resolvedAt ? formatRecordTime(selectedAlert.resolvedAt) : '--' }}</dd></div></dl>
+        <div class="alert-message"><span class="severity" :class="selectedAlert.level.toLowerCase()">{{ statusText(selectedAlert.level) }}</span><strong>{{ alertMessage(selectedAlert) }}</strong></div>
+        <dl class="alert-context"><div><dt>所属项目</dt><dd>{{ selectedAlert.projectNameSnapshot || selectedAlert.projectName }}</dd></div><div><dt>巡检计划</dt><dd>{{ selectedAlert.inspectionPlanName || '--' }}</dd></div><div><dt>告警服务</dt><dd>{{ selectedAlert.targetNameSnapshot || selectedAlert.targetName }}</dd></div><div><dt>首次发生</dt><dd>{{ formatRecordTime(selectedAlert.firstOccurredAt || selectedAlert.occurredAt) }}</dd></div><div><dt>本次发生</dt><dd>{{ formatRecordTime(selectedAlert.occurredAt) }}</dd></div><div><dt>恢复时间</dt><dd>{{ selectedAlert.resolvedAt ? formatRecordTime(selectedAlert.resolvedAt) : '--' }}</dd></div></dl>
         <div class="alert-actions"><el-button v-if="selectedAlert.handlingStatus === 'OPEN'" type="primary" :loading="alertActionLoading" @click="handleAlertAction('acknowledge')">确认告警</el-button><el-button :loading="alertActionLoading" @click="handleAlertAction('note')">添加备注</el-button><el-button v-if="selectedAlert.externalLifecycle === 'RESOLVED' && selectedAlert.handlingStatus !== 'CLOSED'" type="success" :loading="alertActionLoading" @click="handleAlertAction('close')">关闭告警</el-button></div>
         <section class="alert-history"><h3>处置历史</h3><el-timeline v-if="alertEvents.length"><el-timeline-item v-for="event in alertEvents" :key="event.id" :timestamp="formatRecordTime(event.occurredAt)" placement="top"><strong>{{ statusText(event.action) }}</strong><p>{{ event.operatorName }}<template v-if="event.note"> · {{ event.note }}</template></p><small>{{ statusText(event.fromStatus) }} → {{ statusText(event.toStatus) }}</small></el-timeline-item></el-timeline><div v-else class="empty-trend">暂无处置记录</div></section>
       </div>
