@@ -5,23 +5,29 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.JpaRepository;
-import jakarta.persistence.LockModeType;
+import javax.persistence.LockModeType;
 
 public interface InspectionPlanBindingRepository extends JpaRepository<InspectionPlanBinding, Long> {
-  List<InspectionPlanBinding> findByPlanIdOrderById(Long planId);
-  List<InspectionPlanBinding> findByAssetIdOrderById(Long assetId);
-  Optional<InspectionPlanBinding> findByPlanIdAndAssetIdAndOwnershipStatusNot(
-      Long planId, Long assetId, String ownershipStatus);
-  @Lock(LockModeType.PESSIMISTIC_WRITE)
-  @Query("select binding from InspectionPlanBinding binding where binding.planId = :planId "
-      + "and binding.assetId = :assetId and binding.ownershipStatus <> 'RELEASED'")
-  Optional<InspectionPlanBinding> findCurrentForUpdate(Long planId, Long assetId);
-  @Lock(LockModeType.PESSIMISTIC_WRITE)
-  @Query("select binding from InspectionPlanBinding binding where binding.assetId = :assetId "
-      + "and binding.ownershipStatus <> 'RELEASED'")
-  List<InspectionPlanBinding> findActiveHistoryForUpdate(Long assetId);
-  Optional<InspectionPlanBinding> findByActiveOwnerKey(Long activeOwnerKey);
-  boolean existsByPlanIdAndOwnershipStatusNot(Long planId, String ownershipStatus);
-  boolean existsByAssetIdAndOwnershipStatusNot(Long assetId, String ownershipStatus);
-  void deleteByPlanId(Long planId);
+
+    List<InspectionPlanBinding> findByPlanIdOrderById(Long planId);
+
+    List<InspectionPlanBinding> findByAssetIdOrderById(Long assetId);
+
+    Optional<InspectionPlanBinding> findByPlanIdAndAssetIdAndOwnershipStatusNot(Long planId, Long assetId, String ownershipStatus);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select binding from InspectionPlanBinding binding where binding.planId = :planId " + "and binding.assetId = :assetId and binding.ownershipStatus <> 'RELEASED'")
+    Optional<InspectionPlanBinding> findCurrentForUpdate(Long planId, Long assetId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select binding from InspectionPlanBinding binding where binding.assetId = :assetId " + "and binding.ownershipStatus <> 'RELEASED'")
+    List<InspectionPlanBinding> findActiveHistoryForUpdate(Long assetId);
+
+    Optional<InspectionPlanBinding> findByActiveOwnerKey(Long activeOwnerKey);
+
+    boolean existsByPlanIdAndOwnershipStatusNot(Long planId, String ownershipStatus);
+
+    boolean existsByAssetIdAndOwnershipStatusNot(Long assetId, String ownershipStatus);
+
+    void deleteByPlanId(Long planId);
 }

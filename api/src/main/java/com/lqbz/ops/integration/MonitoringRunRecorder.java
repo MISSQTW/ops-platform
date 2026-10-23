@@ -11,33 +11,35 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class MonitoringRunRecorder {
-  private final MonitoringSyncRunRepository runs;
-  private final TransactionTemplate requiresNew;
 
-  public MonitoringRunRecorder(MonitoringSyncRunRepository runs, PlatformTransactionManager transactionManager) {
-    this.runs = runs;
-    this.requiresNew = new TransactionTemplate(transactionManager);
-    this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-  }
+    private final MonitoringSyncRunRepository runs;
 
-  public MonitoringSyncRun start(String triggerType, LocalDateTime startedAt) {
-    return requiresNew.execute(status -> runs.saveAndFlush(new MonitoringSyncRun(triggerType, startedAt)));
-  }
+    private final TransactionTemplate requiresNew;
 
-  public MonitoringSyncRun finish(Long runId, MonitoringRunOutcome outcome) {
-    return requiresNew.execute(status -> {
-      MonitoringSyncRun run = runs.findById(runId).orElseThrow();
-      run.finish(outcome, LocalDateTime.now());
-      return runs.saveAndFlush(run);
-    });
-  }
+    public MonitoringRunRecorder(MonitoringSyncRunRepository runs, PlatformTransactionManager transactionManager) {
+        this.runs = runs;
+        this.requiresNew = new TransactionTemplate(transactionManager);
+        this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
-  public void recoverInterrupted() {
-    requiresNew.executeWithoutResult(status -> {
-      for (MonitoringSyncRun run : runs.findByStatus("RUNNING")) {
-        run.abandon(LocalDateTime.now());
-        runs.save(run);
-      }
-    });
-  }
+    public MonitoringSyncRun start(String triggerType, LocalDateTime startedAt) {
+        return requiresNew.execute(status -> runs.saveAndFlush(new MonitoringSyncRun(triggerType, startedAt)));
+    }
+
+    public MonitoringSyncRun finish(Long runId, MonitoringRunOutcome outcome) {
+        return requiresNew.execute(status -> {
+            MonitoringSyncRun run = runs.findById(runId).orElseThrow(java.util.NoSuchElementException::new);
+            run.finish(outcome, LocalDateTime.now());
+            return runs.saveAndFlush(run);
+        });
+    }
+
+    public void recoverInterrupted() {
+        requiresNew.executeWithoutResult(status -> {
+            for (MonitoringSyncRun run : runs.findByStatus("RUNNING")) {
+                run.abandon(LocalDateTime.now());
+                runs.save(run);
+            }
+        });
+    }
 }

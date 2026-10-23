@@ -9,7 +9,7 @@ cd api && mvn -DskipTests package && cd ..
 docker compose up -d --build
 ```
 
-后端 Dockerfile 使用 `api/target` 中已打包的 JAR，更新后端代码后须先重新打包。打包需要 Java 21。
+后端 Dockerfile 使用 `api/target` 中已打包的 JAR，更新后端代码后须先重新打包。打包和运行均使用 Java 8（建议使用仍提供安全更新的发行版）。
 
 ## 服务地址
 
@@ -19,11 +19,11 @@ docker compose up -d --build
 
 ## 本地开发
 
-后端需要 Java 21：
+后端使用 Java 8：
 
 ```bash
 cd api
-JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home mvn spring-boot:run
+JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home mvn spring-boot:run
 ```
 
 前端：
@@ -83,13 +83,17 @@ npm run dev
 
 默认会短暂暂停现有 HertzBeat 容器；共享环境可设置 `VERIFY_OUTAGE=0` 跳过该步骤。当前脚本面向本仓库默认 Compose 名称与网络，使用默认测试账号，可通过脚本顶部环境变量覆盖账号和组件地址。脚本退出时按本轮创建的 ID 清理测试历史，需要访问本机 Docker 与测试 PostgreSQL。
 
+## Java 8 兼容
+
+平台 API 使用 Spring Boot 2.7.18，源码和产物均面向 Java 8，Docker 运行镜像为 Temurin 8。此版本已结束 Spring 官方开源维护；部署方需安排持续安全更新。HertzBeat、数据库等独立组件使用各自镜像内的运行环境，不要求宿主机安装较新 JDK。
+
 ## 深度协议巡检
 
 默认服务仍执行基础 TCP/HTTP 可用性检查。在服务详情的“深度巡检”中保存并启用配置后，手动测试、计划兜底与 HertzBeat 周期采集使用相同协议探测器：
 
 | 类型 | 实际检查 | 必需配置 |
 | --- | --- | --- |
-| 服务器 | SSH 登录和 `df -Pk`，逐挂载点检查使用率 | 用户名、可信 SHA256 主机指纹、密码或私钥；可指定/排除挂载点与磁盘阈值 |
+| 服务器 | Linux：SSH 登录和 `df -Pk`；Windows：WinRM HTTPS 登录及只读 PowerShell 固定磁盘检查 | 选择操作系统；Linux 使用可信 SSH 指纹和密码或私钥，Windows 使用 NTLM 或 Basic 用户密码；可指定/排除挂载点或盘符与磁盘阈值 |
 | MySQL / PostgreSQL | 登录指定数据库并执行 `SELECT 1` | 用户名、密码、数据库 |
 | Redis | 可选 AUTH 后执行 PING | 需要认证时填写用户名/密码 |
 | Kafka | Admin 查询集群元数据 | 可选 TLS、SASL 用户名/密码与机制 |
@@ -102,7 +106,13 @@ npm run dev
 
 Compose 已将内部桥接地址设为 `http://api:8080`；其他部署方式需设置 `OPS_INSPECTION_BRIDGE_BASE_URL`，确保 HertzBeat 能访问平台 API。平台每服务、每配置版本派生独立 Basic 凭据，桥接仅返回检查是否通过。凭据与配置均需在可信网络传输，跨不可信网络时为桥接配置 HTTPS。
 
-敏感配置加密存储，接口只返回已配置字段名；界面留空保留原值，使用“清除”才删除。SSH 指纹应从可信控制台获取并核对；磁盘使用率达到阈值即失败。SSH/磁盘检查适用于 Linux/POSIX 环境。协议超时可配置为 1000–10000 毫秒，单次检查总预算 30 秒。每服务同时最多一个检查，全局最多 16 个；手动测试不直接计告警次数，但会与采集竞争。忙碌、过载及超时均作为采集链路失败采样计入计划连续失败次数，建议周期长于检查耗时。
+敏感配置加密存储，接口只返回已配置字段名；界面留空保留原值，使用“清除”才删除。SSH 指纹应从可信控制台获取并核对；磁盘使用率达到阈值即失败。协议超时可配置为 1000–10000 毫秒，单次检查总预算 30 秒。每服务同时最多一个检查，全局最多 16 个；手动测试不直接计告警次数，但会与采集竞争。忙碌、过载及超时均作为采集链路失败采样计入计划连续失败次数，建议周期长于检查耗时。
+
+Windows 服务器需安装 Windows PowerShell 3.0 或以上（支持 `Get-CimInstance`），启用 WinRM 服务、远程 shell 权限及 HTTPS 监听。为目标主机安装有效、受信任且包含目标 DNS 名的服务器身份认证证书，管理员执行 `winrm quickconfig -transport:https`，仅向巡检 API 所在网络放行 TCP 5986。资产地址填写 `https://server.example.com:5986/wsman`，或 `server.example.com:5986`；不要填写 RDP 3389 端口。配置页面选择 WINDOWS，填写用户名、密码及需要时的域/计算机名。默认 NTLM（兼容服务端 Negotiate 认证头承载的 NTLM；服务端需启用 Negotiate）；本地账号权限受 Windows UAC 与远程 shell 策略约束，应由管理员授予必要权限，不建议全局关闭 UAC。需要 Basic 时，管理员应按组织策略仅在 HTTPS 服务启用 Basic，保持 `AllowUnencrypted=false`。客户端不提供跳过证书或主机名校验选项；企业 CA 需导入部署 JVM 的信任库，并通过 `-Djavax.net.ssl.trustStore=...`、`-Djavax.net.ssl.trustStorePassword=...` 指定（信任库密码使用部署密钥管理，不提交仓库）。
+
+Windows 仅执行内置的 `Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=3'` 只读采集，总量与可用量来自本机固定逻辑磁盘，盘符筛选在 API 本地执行，不拼入远程脚本。盘符格式如 `C:,D:`，排除项优先；指定盘符不存在、容量无效、没有可检查磁盘、认证/命令失败或使用率达到阈值均失败。WinRM 请求总预算包含连接、认证、命令、接收及预留的 shell 清理时间，响应和命令输出均有大小限制。网络中断时远程删除为尽力清理，Windows 管理员应保留适当的 WinRM 空闲 shell 超时。
+
+Windows 自动测试使用本地 HTTPS WSMan 协议夹具，覆盖 Basic、显式 NTLM 和仅 Negotiate 挑战的认证、TLS 拒绝、shell 生命周期、清理及磁盘阈值；不等同于真实 Windows 验收。上线前需在实际域账号/本地账号与组织证书策略下，验证 NTLM 或 Basic 登录、C:/D: 输出、阈值和排除、错误密码、证书不匹配与超时清理。部署参考：[Microsoft WinRM HTTPS 配置](https://learn.microsoft.com/en-us/troubleshoot/windows-client/system-management-components/configure-winrm-for-https)、[WinRM 远程认证](https://learn.microsoft.com/en-us/windows/win32/winrm/authentication-for-remote-connections)、[Apache HttpClient NTLM 支持](https://hc.apache.org/httpcomponents-client-4.5.x/ntlm.html)。
 
 HertzBeat 每周期调用平台并执行一次真实探测，按计划产生故障与恢复告警。保存配置后可在计划页手动同步，后台也会补偿；同步前旧版凭据会被拒绝。HertzBeat 将密码读回为遮罩，配置校验对比版本用户名及其他参数，并通过官方单 Monitor JSON 导出核对成功写入后的凭据指纹；仅密码漂移也会补偿，正常配置不会重置采集。指纹只在内存保存，平台重启后首次校准会重新写入一次凭据。导出权限缺失或不兼容会明确显示同步失败，导出内容不落盘、不回传界面。配置同步成功并不代表已经采集成功。
 

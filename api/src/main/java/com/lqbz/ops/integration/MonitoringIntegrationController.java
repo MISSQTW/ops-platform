@@ -15,57 +15,119 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/integrations")
 public class MonitoringIntegrationController {
-  private final HertzBeatClient hertzBeatClient;
-  private final AssetMonitoringSyncService syncService;
-  private final MonitoringSyncCoordinator monitoringSyncCoordinator;
-  private final MonitoringSyncRunRepository monitoringRuns;
-  private final AssetRepository assets;
-  private final MonitoringMetricsService metricsService;
 
-  public MonitoringIntegrationController(HertzBeatClient hertzBeatClient, AssetMonitoringSyncService syncService,
-      MonitoringSyncCoordinator monitoringSyncCoordinator, MonitoringSyncRunRepository monitoringRuns,
-      AssetRepository assets, MonitoringMetricsService metricsService) {
-    this.hertzBeatClient = hertzBeatClient;
-    this.syncService = syncService;
-    this.monitoringSyncCoordinator = monitoringSyncCoordinator;
-    this.monitoringRuns = monitoringRuns;
-    this.assets = assets;
-    this.metricsService = metricsService;
-  }
+    private final HertzBeatClient hertzBeatClient;
 
-  @GetMapping("/hertzbeat/status")
-  public HertzBeatClient.Status hertzBeatStatus() { return hertzBeatClient.status(); }
+    private final AssetMonitoringSyncService syncService;
 
-  @PostMapping("/hertzbeat/assets/{id}/sync")
-  public Asset syncAsset(@PathVariable Long id) {
-    throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
-        "服务同步入口已停用，请在巡检计划中保存或手动同步监控配置");
-  }
+    private final MonitoringSyncCoordinator monitoringSyncCoordinator;
 
-  @PostMapping("/hertzbeat/assets/sync-all")
-  public AssetMonitoringSyncService.SyncAllResult syncAllAssets() {
-    throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
-        "批量服务同步入口已停用，请使用巡检计划同步");
-  }
+    private final MonitoringSyncRunRepository monitoringRuns;
 
-  @PostMapping("/hertzbeat/monitoring/sync")
-  public MonitoringSyncRun syncMonitoringData() { return monitoringSyncCoordinator.run("MANUAL"); }
+    private final AssetRepository assets;
 
-  @GetMapping("/hertzbeat/monitoring/runs")
-  public List<MonitoringSyncRun> monitoringRuns() { return monitoringRuns.findTop20ByOrderByStartedAtDesc(); }
+    private final MonitoringMetricsService metricsService;
 
-  @GetMapping("/hertzbeat/assets/{id}/details")
-  public MonitoringDetails monitoringDetails(@PathVariable Long id) throws Exception {
-    Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
-    if (asset.getHertzbeatMonitorId() == null) {
-      return new MonitoringDetails(asset, List.of(), List.of(), "尚未绑定 HertzBeat 监控", false, null, true);
+    public MonitoringIntegrationController(HertzBeatClient hertzBeatClient, AssetMonitoringSyncService syncService, MonitoringSyncCoordinator monitoringSyncCoordinator, MonitoringSyncRunRepository monitoringRuns, AssetRepository assets, MonitoringMetricsService metricsService) {
+        this.hertzBeatClient = hertzBeatClient;
+        this.syncService = syncService;
+        this.monitoringSyncCoordinator = monitoringSyncCoordinator;
+        this.monitoringRuns = monitoringRuns;
+        this.assets = assets;
+        this.metricsService = metricsService;
     }
-    MonitoringMetricsService.Result metrics = metricsService.load(asset);
-    return new MonitoringDetails(asset, metrics.latest(), metrics.history(), metrics.message(), metrics.cached(),
-        metrics.collectedAt(), metrics.stale());
-  }
 
-  public record MonitoringDetails(Asset asset, List<MonitoringMetric> latestMetrics,
-                                  List<MonitoringMetric> history, String metricsMessage, boolean metricsCached,
-                                  java.time.LocalDateTime metricsCollectedAt, boolean metricsStale) {}
+    @GetMapping("/hertzbeat/status")
+    public HertzBeatClient.Status hertzBeatStatus() {
+        return hertzBeatClient.status();
+    }
+
+    @PostMapping("/hertzbeat/assets/{id}/sync")
+    public Asset syncAsset(@PathVariable Long id) {
+        throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE, "服务同步入口已停用，请在巡检计划中保存或手动同步监控配置");
+    }
+
+    @PostMapping("/hertzbeat/assets/sync-all")
+    public AssetMonitoringSyncService.SyncAllResult syncAllAssets() {
+        throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE, "批量服务同步入口已停用，请使用巡检计划同步");
+    }
+
+    @PostMapping("/hertzbeat/monitoring/sync")
+    public MonitoringSyncRun syncMonitoringData() {
+        return monitoringSyncCoordinator.run("MANUAL");
+    }
+
+    @GetMapping("/hertzbeat/monitoring/runs")
+    public List<MonitoringSyncRun> monitoringRuns() {
+        return monitoringRuns.findTop20ByOrderByStartedAtDesc();
+    }
+
+    @GetMapping("/hertzbeat/assets/{id}/details")
+    public MonitoringDetails monitoringDetails(@PathVariable Long id) throws Exception {
+        Asset asset = assets.findById(id).orElseThrow(() -> new NoSuchElementException("服务不存在"));
+        if (asset.getHertzbeatMonitorId() == null) {
+            return new MonitoringDetails(asset, com.lqbz.ops.compat.Java8.list(), com.lqbz.ops.compat.Java8.list(), "尚未绑定 HertzBeat 监控", false, null, true);
+        }
+        MonitoringMetricsService.Result metrics = metricsService.load(asset);
+        return new MonitoringDetails(asset, metrics.latest(), metrics.history(), metrics.message(), metrics.cached(), metrics.collectedAt(), metrics.stale());
+    }
+
+    @lombok.EqualsAndHashCode()
+    @lombok.ToString()
+    @com.fasterxml.jackson.annotation.JsonAutoDetect(fieldVisibility = com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY, getterVisibility = com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE, isGetterVisibility = com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE)
+    public final static class MonitoringDetails {
+
+        @com.fasterxml.jackson.annotation.JsonCreator()
+        public MonitoringDetails(@com.fasterxml.jackson.annotation.JsonProperty("asset") Asset asset, @com.fasterxml.jackson.annotation.JsonProperty("latestMetrics") List<MonitoringMetric> latestMetrics, @com.fasterxml.jackson.annotation.JsonProperty("history") List<MonitoringMetric> history, @com.fasterxml.jackson.annotation.JsonProperty("metricsMessage") String metricsMessage, @com.fasterxml.jackson.annotation.JsonProperty("metricsCached") boolean metricsCached, @com.fasterxml.jackson.annotation.JsonProperty("metricsCollectedAt") java.time.LocalDateTime metricsCollectedAt, @com.fasterxml.jackson.annotation.JsonProperty("metricsStale") boolean metricsStale) {
+            this.asset = asset;
+            this.latestMetrics = latestMetrics;
+            this.history = history;
+            this.metricsMessage = metricsMessage;
+            this.metricsCached = metricsCached;
+            this.metricsCollectedAt = metricsCollectedAt;
+            this.metricsStale = metricsStale;
+        }
+
+        private final Asset asset;
+
+        public Asset asset() {
+            return this.asset;
+        }
+
+        private final List<MonitoringMetric> latestMetrics;
+
+        public List<MonitoringMetric> latestMetrics() {
+            return this.latestMetrics;
+        }
+
+        private final List<MonitoringMetric> history;
+
+        public List<MonitoringMetric> history() {
+            return this.history;
+        }
+
+        private final String metricsMessage;
+
+        public String metricsMessage() {
+            return this.metricsMessage;
+        }
+
+        private final boolean metricsCached;
+
+        public boolean metricsCached() {
+            return this.metricsCached;
+        }
+
+        private final java.time.LocalDateTime metricsCollectedAt;
+
+        public java.time.LocalDateTime metricsCollectedAt() {
+            return this.metricsCollectedAt;
+        }
+
+        private final boolean metricsStale;
+
+        public boolean metricsStale() {
+            return this.metricsStale;
+        }
+    }
 }

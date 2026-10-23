@@ -1,1 +1,1 @@
-{"root":["./src/api.ts","./src/env.d.ts","./src/inspectionprofilefields.ts","./src/main.ts","./src/router.ts","./src/servicestate.ts","./src/app.vue","./src/inspectionprofilepanel.vue"],"version":"5.7.3"}
+{"root":["./src/api.ts","./src/env.d.ts","./src/inspectionprofilefields.ts","./src/main.ts","./src/router.ts","./src/servicestate.ts","./src/app.vue","./src/infotip.vue","./src/inspectionprofilepanel.vue"],"version":"5.7.3"}

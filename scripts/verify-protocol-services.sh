@@ -179,8 +179,8 @@ if wait_ready rocket has_log rocket 'Name Server boot success'; then
   export PROBE_IT_ROCKET_ENDPOINT="$(host_endpoint rocket 9876)"
 fi
 
-if [[ -z "${JAVA_HOME:-}" && -d /Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ]]; then
-  export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+if [[ -z "${JAVA_HOME:-}" && -d /Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home ]]; then
+  export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home
 fi
 log '开始运行真实产品 IT（正确与错误认证），脱敏 Maven 输出保存到 maven.log'
 set +e

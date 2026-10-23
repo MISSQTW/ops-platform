@@ -82,7 +82,7 @@ button { cursor: pointer; }
 .service-row-actions { display: flex; align-items: center; gap: 12px; }
 .list-summary { height: 38px; display: flex; align-items: flex-start; justify-content: space-between; color: #7e888b; font-size: 11px; }
 .legend { display: flex; align-items: center; gap: 7px; }.legend i { width: 6px; height: 6px; border-radius: 50%; margin-left: 6px; }.legend .ok { background: #25aa77; }.legend .warn { background: #d7a13a; }.legend .bad { background: #d65353; }
-.project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 360px)); gap: 16px; align-content: start; }
 .project-card { background: #fff; border: 1px solid #dfe4e2; padding: 20px; border-radius: 7px; }
 .project-head { display: flex; align-items: center; justify-content: space-between; }.project-symbol { width: 36px; height: 36px; display: grid; place-items: center; background: #e6f3ee; color: #207d5b; border-radius: 6px; font-weight: 650; }
 .card-actions, .row-actions { display: flex; align-items: center; gap: 5px; }.card-actions button, .row-actions button { width: 29px; height: 29px; border: 1px solid #dce2df; background: #fff; color: #647074; border-radius: 5px; display: grid; place-items: center; }.card-actions button:hover, .row-actions button:hover { color: #17875f; border-color: #9bceb9; }.card-actions .danger-action:hover, .row-actions .danger-action:hover { color: #bd4444; border-color: #e7b0b0; }
@@ -115,4 +115,17 @@ button { cursor: pointer; }
 .monitoring-detail { min-height: 360px; display: grid; gap: 16px; align-content: start; }.monitoring-summary { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #dfe5e2; border-radius: 6px; background: #f7f9f8; }.monitoring-summary > div { padding: 14px; border-right: 1px solid #dfe5e2; }.monitoring-summary > div:last-child { border-right: 0; }.monitoring-summary span, .monitoring-summary strong { display: block; }.monitoring-summary span { color: #818c89; font-size: 10px; }.monitoring-summary strong { margin-top: 5px; color: #26312f; font-size: 13px; }
 .monitoring-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }.monitoring-metrics article { min-height: 100px; padding: 15px; border: 1px solid #dfe5e2; border-radius: 6px; background: #fff; }.monitoring-metrics span, .monitoring-metrics strong, .monitoring-metrics small { display: block; }.monitoring-metrics span { color: #73807c; font-size: 11px; }.monitoring-metrics strong { margin-top: 9px; font-size: 21px; }.monitoring-metrics small { margin-top: 9px; color: #99a29f; font-size: 9px; }
 .trend-section h3, .sync-history h3 { margin: 0 0 10px; font-size: 12px; }.trend-bars { height: 140px; padding: 12px; border: 1px solid #dfe5e2; display: flex; align-items: end; gap: 3px; background: #f7f9f8; }.trend-bars i { flex: 1; min-width: 2px; max-width: 12px; background: #2d9a70; }.empty-trend { height: 100px; display: grid; place-items: center; border: 1px dashed #ccd5d1; color: #929c98; font-size: 11px; }.sync-history > div { min-height: 34px; display: grid; grid-template-columns: 80px 145px 1fr; align-items: center; gap: 8px; border-bottom: 1px solid #edf0ef; color: #697572; font-size: 10px; }
-@media (max-width: 1280px) { .metrics-grid { grid-template-columns: repeat(3, 1fr); }.project-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 1280px) { .metrics-grid { grid-template-columns: repeat(3, 1fr); } }
+
+.alert-history strong { display: block; color: #283330; line-height: 1.6; overflow-wrap: anywhere; }
+.alert-event-time { color: #818c89; font-size: 12px; white-space: nowrap; }
+.alert-history .alert-event-note { padding: 10px 12px; background: #f5f7f6; border-radius: 4px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.service-last-result { display: block; margin-top: 5px; color: #818c89; font-size: 11px; line-height: 1.5; }
+
+.alert-history .el-timeline { padding-left: 8px; margin: 0; }
+
+.alert-event-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; }
+
+.plan-action-trigger { display: inline-flex; }
+.plan-action-trigger button:disabled { pointer-events: none; }
